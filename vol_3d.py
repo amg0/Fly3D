@@ -1,28 +1,79 @@
-# vol_3d
 import pydeck as pdk
 import pandas as pd
+import gpxpy
+import os
+import webbrowser
 
-# 1. Nos données de vol factices (Longitude, Latitude, Altitude en mètres)
-# Exemple d'une trace qui monte en altitude au-dessus des montagnes
-flight_path = [
-    [5.80, 45.18, 1500], # Point de départ
-    [5.85, 45.20, 2000], # On monte...
-    [5.90, 45.22, 2500],
-    [5.95, 45.24, 2800],
-    [6.00, 45.26, 3000], # Sommet du vol
-    [6.05, 45.28, 2600], # Descente
-    [6.10, 45.30, 2000],
-]
+def choisir_fichier_gpx():
+    """Demande le fichier via le terminal avec support du glisser-déposer"""
+    print("\n" + "="*55)
+    print("🚁 GÉNÉRATEUR DE VOL 3D")
+    print("="*55)
+    print("Glissez-déposez votre fichier trace .gpx ici,")
+    print("puis appuyez sur Entrée :")
+    
+    chemin = input("> ").strip()
+    
+    # Le terminal Mac rajoute souvent des guillemets lors d'un glisser-déposer,
+    # on les retire proprement pour éviter les bugs de lecture.
+    if chemin.startswith("'") and chemin.endswith("'"):
+        chemin = chemin[1:-1]
+    elif chemin.startswith('"') and chemin.endswith('"'):
+        chemin = chemin[1:-1]
+        
+    return chemin.strip()
 
-# On place la trace dans un DataFrame Pandas (format attendu par PyDeck)
+def lire_gpx(chemin_fichier):
+    """Lit le fichier GPX et renvoie une liste [longitude, latitude, altitude]"""
+    flight_path = []
+    
+    try:
+        with open(chemin_fichier, 'r', encoding='utf-8') as gpx_file:
+            gpx = gpxpy.parse(gpx_file)
+            
+            for track in gpx.tracks:
+                for segment in track.segments:
+                    for point in segment.points:
+                        altitude = point.elevation if point.elevation is not None else 0
+                        flight_path.append([point.longitude, point.latitude, altitude])
+    except Exception as e:
+        print(f"❌ Erreur lors de la lecture du fichier : {e}")
+        return []
+                    
+    return flight_path
+
+def calculer_centre(flight_path):
+    """Calcule le point moyen pour centrer la caméra"""
+    if not flight_path:
+        return 0, 0
+    
+    avg_lon = sum([pt[0] for pt in flight_path]) / len(flight_path)
+    avg_lat = sum([pt[1] for pt in flight_path]) / len(flight_path)
+    return avg_lon, avg_lat
+
+# ==========================================
+# EXÉCUTION DU PROGRAMME
+# ==========================================
+
+chemin_trace = choisir_fichier_gpx()
+
+if not chemin_trace or not os.path.exists(chemin_trace):
+    print("❌ Fichier introuvable ou invalide. Annulation.")
+    exit()
+
+print(f"Lecture du fichier : {os.path.basename(chemin_trace)}...")
+ma_trace = lire_gpx(chemin_trace)
+
+if not ma_trace:
+    exit()
+
 df_vol = pd.DataFrame({
-    "trace": [flight_path],
-    "couleur": [[255, 50, 50]] # Rouge vif pour bien voir le trajet
+    "trace": [ma_trace],
+    "couleur": [[255, 50, 50]] 
 })
 
-# 2. Configuration du relief (TerrainLayer)
-# On utilise des données d'élévation libres (AWS Terrarium) et une image satellite (ArcGIS)
-# Cela t'évite d'avoir à créer des clés d'API pour ce test !
+centre_lon, centre_lat = calculer_centre(ma_trace)
+
 ELEVATION_DECODER = {"rScaler": 256, "gScaler": 1, "bScaler": 1 / 256, "offset": -32768}
 TERRAIN_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 SATELLITE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
@@ -34,7 +85,6 @@ couche_relief = pdk.Layer(
     elevation_data=TERRAIN_URL,
 )
 
-# 3. Configuration de la trace 3D (PathLayer)
 couche_trace = pdk.Layer(
     "PathLayer",
     df_vol,
@@ -47,25 +97,23 @@ couche_trace = pdk.Layer(
     cap_rounded=True,
 )
 
-# 4. Paramètres de la caméra (ViewState)
-# On se place au centre de la trace, on "penche" la caméra (pitch) et on zoome
 vue_initiale = pdk.ViewState(
-    longitude=5.95,
-    latitude=45.24,
-    zoom=10.5,
-    pitch=65,    # C'est ce qui donne l'effet 3D !
-    bearing=45   # Orientation de la boussole
+    longitude=centre_lon,
+    latitude=centre_lat,
+    zoom=11,     
+    pitch=65,    
+    bearing=45   
 )
 
-# 5. Création de la carte et exportation
 carte = pdk.Deck(
     layers=[couche_relief, couche_trace],
     initial_view_state=vue_initiale,
-    # On désactive la carte de fond par défaut car on utilise notre propre texture satellite
     map_provider=None 
 )
 
-# Génère le fichier HTML
-fichier_sortie = "mon_vol_3d.html"
+fichier_sortie = "mon_vol_sdvfr_3d.html"
 carte.to_html(fichier_sortie)
-print(f"✅ Fichier {fichier_sortie} généré avec succès ! Ouvre-le dans ton navigateur.")
+
+chemin_absolu = os.path.abspath(fichier_sortie)
+print(f"✅ Terminé ! Ouverture de la carte 3D dans votre navigateur...")
+webbrowser.open(f"file://{chemin_absolu}")
