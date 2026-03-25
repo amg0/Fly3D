@@ -4,10 +4,14 @@ import gpxpy
 import os
 import webbrowser
 import subprocess
-import platform # <-- Ajout pour détecter Mac ou Windows
+import platform
+import json
+
+# ==========================================
+# FONCTIONS DE SÉLECTION DE FICHIER 
+# ==========================================
 
 def choisir_fichier_gpx_mac():
-    """Boîte de dialogue native pour macOS via AppleScript"""
     print("Ouverture de la fenêtre de sélection Mac...")
     script_apple = '''
     set leFichier to choose file with prompt "Sélectionnez votre trace SDVFR (fichier .gpx)"
@@ -23,15 +27,13 @@ def choisir_fichier_gpx_mac():
         return None
 
 def choisir_fichier_gpx_windows():
-    """Boîte de dialogue standard pour Windows/Linux via tkinter"""
     print("Ouverture de la fenêtre de sélection Windows...")
-    # On importe tkinter seulement ici pour ne pas faire planter le Mac !
     import tkinter as tk
     from tkinter import filedialog
     
     root = tk.Tk()
     root.withdraw()
-    root.attributes('-topmost', True) # Force la fenêtre au premier plan
+    root.attributes('-topmost', True) 
     
     fichier = filedialog.askopenfilename(
         title="Sélectionnez votre trace SDVFR (fichier .gpx)",
@@ -40,16 +42,18 @@ def choisir_fichier_gpx_windows():
     return fichier
 
 def choisir_fichier_gpx():
-    """Détecte l'OS et lance la bonne boîte de dialogue"""
     systeme = platform.system()
     if systeme == "Darwin":
         return choisir_fichier_gpx_mac()
     else:
         return choisir_fichier_gpx_windows()
 
-def lire_gpx(chemin_fichier):
-    """Lit le fichier GPX et renvoie une liste [longitude, latitude, altitude]"""
-    flight_path = []
+# ==========================================
+# FONCTIONS DE TRAITEMENT DES DONNÉES
+# ==========================================
+
+def lire_gpx_sdvfr_complet(chemin_fichier):
+    donnees_vol = []
     
     try:
         with open(chemin_fichier, 'r', encoding='utf-8') as gpx_file:
@@ -58,28 +62,38 @@ def lire_gpx(chemin_fichier):
             for track in gpx.tracks:
                 for segment in track.segments:
                     for point in segment.points:
-                        altitude = point.elevation if point.elevation is not None else 0
-                        flight_path.append([point.longitude, point.latitude, altitude])
+                        desc_texte = point.description
+                        if desc_texte:
+                            try:
+                                desc_data = json.loads(desc_texte)
+                                if 'alt' in desc_data and 'ele' in desc_data:
+                                    donnees_vol.append({
+                                        'lon': point.longitude,
+                                        'lat': point.latitude,
+                                        'air_alt': desc_data['alt'],
+                                        'terr_alt': desc_data['ele'],
+                                        'spd': desc_data.get('spd', 0),
+                                        'crs': desc_data.get('crs', 0)
+                                    })
+                            except json.JSONDecodeError:
+                                pass
     except Exception as e:
         print(f"❌ Erreur lors de la lecture du fichier : {e}")
         return []
                     
-    return flight_path
+    return donnees_vol
 
-def calculer_centre(flight_path):
-    """Calcule le point moyen pour centrer la caméra"""
-    if not flight_path:
+def calculer_centre(flight_data):
+    if not flight_data:
         return 0, 0
-    
-    avg_lon = sum([pt[0] for pt in flight_path]) / len(flight_path)
-    avg_lat = sum([pt[1] for pt in flight_path]) / len(flight_path)
+    avg_lon = sum(pt['lon'] for pt in flight_data) / len(flight_data)
+    avg_lat = sum(pt['lat'] for pt in flight_data) / len(flight_data)
     return avg_lon, avg_lat
 
 # ==========================================
 # EXÉCUTION DU PROGRAMME
 # ==========================================
 
-# 1. Le script choisit automatiquement la bonne méthode
 chemin_trace = choisir_fichier_gpx()
 
 if not chemin_trace:
@@ -87,20 +101,32 @@ if not chemin_trace:
     exit()
 
 print(f"Lecture du fichier : {os.path.basename(chemin_trace)}...")
-ma_trace = lire_gpx(chemin_trace)
+donnees_vol_completes = lire_gpx_sdvfr_complet(chemin_trace)
 
-if not ma_trace:
+if not donnees_vol_completes:
+    print("❌ Impossible de lire des données valides pour la 3D avancée.")
     exit()
 
-# 2. Préparation des données
-df_vol = pd.DataFrame({
-    "trace": [ma_trace],
-    "couleur": [[255, 50, 50]] 
+# 1. Trace principale (Ligne rouge)
+ma_trace_pos = [[pt['lon'], pt['lat'], pt['air_alt']] for pt in donnees_vol_completes]
+df_trace = pd.DataFrame({
+    "trace": [ma_trace_pos],
+    "couleur": [[255, 50, 50]]
 })
 
-centre_lon, centre_lat = calculer_centre(ma_trace)
+# 2. L'ombre verticale (CORRECTION ICI !)
+# Pour un LineLayer, on doit séparer le point de départ et d'arrivée
+sources = [[pt['lon'], pt['lat'], pt['terr_alt']] for pt in donnees_vol_completes]
+cibles = [[pt['lon'], pt['lat'], pt['air_alt']] for pt in donnees_vol_completes]
 
-# 3. Configuration de l'affichage 3D
+df_ombre = pd.DataFrame({
+    "depart": sources,
+    "arrivee": cibles,
+    "couleur": [[100, 100, 100, 120]] * len(donnees_vol_completes) 
+})
+
+centre_lon, centre_lat = calculer_centre(donnees_vol_completes)
+
 ELEVATION_DECODER = {"rScaler": 256, "gScaler": 1, "bScaler": 1 / 256, "offset": -32768}
 TERRAIN_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 SATELLITE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
@@ -112,9 +138,19 @@ couche_relief = pdk.Layer(
     elevation_data=TERRAIN_URL,
 )
 
+# NOUVEAU : On utilise LineLayer au lieu de PathLayer pour l'ombre
+couche_ombre = pdk.Layer(
+    "LineLayer",
+    df_ombre,
+    get_source_position="depart",
+    get_target_position="arrivee",
+    get_color="couleur",
+    get_width=2, # Épaisseur de la ligne en pixels
+)
+
 couche_trace = pdk.Layer(
     "PathLayer",
-    df_vol,
+    df_trace,
     get_path="trace",
     get_color="couleur",
     width_scale=20,
@@ -133,12 +169,11 @@ vue_initiale = pdk.ViewState(
 )
 
 carte = pdk.Deck(
-    layers=[couche_relief, couche_trace],
+    layers=[couche_relief, couche_ombre, couche_trace],
     initial_view_state=vue_initiale,
     map_provider=None 
 )
 
-# 4. Génération et ouverture automatique
 fichier_sortie = "mon_vol_sdvfr_3d.html"
 carte.to_html(fichier_sortie)
 
