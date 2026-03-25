@@ -3,25 +3,49 @@ import pandas as pd
 import gpxpy
 import os
 import webbrowser
+import subprocess
+import platform # <-- Ajout pour détecter Mac ou Windows
+
+def choisir_fichier_gpx_mac():
+    """Boîte de dialogue native pour macOS via AppleScript"""
+    print("Ouverture de la fenêtre de sélection Mac...")
+    script_apple = '''
+    set leFichier to choose file with prompt "Sélectionnez votre trace SDVFR (fichier .gpx)"
+    POSIX path of leFichier
+    '''
+    try:
+        resultat = subprocess.run(
+            ['osascript', '-e', script_apple], 
+            capture_output=True, text=True, check=True
+        )
+        return resultat.stdout.strip()
+    except subprocess.CalledProcessError:
+        return None
+
+def choisir_fichier_gpx_windows():
+    """Boîte de dialogue standard pour Windows/Linux via tkinter"""
+    print("Ouverture de la fenêtre de sélection Windows...")
+    # On importe tkinter seulement ici pour ne pas faire planter le Mac !
+    import tkinter as tk
+    from tkinter import filedialog
+    
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes('-topmost', True) # Force la fenêtre au premier plan
+    
+    fichier = filedialog.askopenfilename(
+        title="Sélectionnez votre trace SDVFR (fichier .gpx)",
+        filetypes=[("Fichiers GPX", "*.gpx"), ("Tous les fichiers", "*.*")]
+    )
+    return fichier
 
 def choisir_fichier_gpx():
-    """Demande le fichier via le terminal avec support du glisser-déposer"""
-    print("\n" + "="*55)
-    print("🚁 GÉNÉRATEUR DE VOL 3D")
-    print("="*55)
-    print("Glissez-déposez votre fichier trace .gpx ici,")
-    print("puis appuyez sur Entrée :")
-    
-    chemin = input("> ").strip()
-    
-    # Le terminal Mac rajoute souvent des guillemets lors d'un glisser-déposer,
-    # on les retire proprement pour éviter les bugs de lecture.
-    if chemin.startswith("'") and chemin.endswith("'"):
-        chemin = chemin[1:-1]
-    elif chemin.startswith('"') and chemin.endswith('"'):
-        chemin = chemin[1:-1]
-        
-    return chemin.strip()
+    """Détecte l'OS et lance la bonne boîte de dialogue"""
+    systeme = platform.system()
+    if systeme == "Darwin":
+        return choisir_fichier_gpx_mac()
+    else:
+        return choisir_fichier_gpx_windows()
 
 def lire_gpx(chemin_fichier):
     """Lit le fichier GPX et renvoie une liste [longitude, latitude, altitude]"""
@@ -55,10 +79,11 @@ def calculer_centre(flight_path):
 # EXÉCUTION DU PROGRAMME
 # ==========================================
 
+# 1. Le script choisit automatiquement la bonne méthode
 chemin_trace = choisir_fichier_gpx()
 
-if not chemin_trace or not os.path.exists(chemin_trace):
-    print("❌ Fichier introuvable ou invalide. Annulation.")
+if not chemin_trace:
+    print("❌ Aucun fichier sélectionné ou opération annulée.")
     exit()
 
 print(f"Lecture du fichier : {os.path.basename(chemin_trace)}...")
@@ -67,6 +92,7 @@ ma_trace = lire_gpx(chemin_trace)
 if not ma_trace:
     exit()
 
+# 2. Préparation des données
 df_vol = pd.DataFrame({
     "trace": [ma_trace],
     "couleur": [[255, 50, 50]] 
@@ -74,6 +100,7 @@ df_vol = pd.DataFrame({
 
 centre_lon, centre_lat = calculer_centre(ma_trace)
 
+# 3. Configuration de l'affichage 3D
 ELEVATION_DECODER = {"rScaler": 256, "gScaler": 1, "bScaler": 1 / 256, "offset": -32768}
 TERRAIN_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 SATELLITE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
@@ -111,6 +138,7 @@ carte = pdk.Deck(
     map_provider=None 
 )
 
+# 4. Génération et ouverture automatique
 fichier_sortie = "mon_vol_sdvfr_3d.html"
 carte.to_html(fichier_sortie)
 
