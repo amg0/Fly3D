@@ -116,7 +116,7 @@ def calculer_centre(flight_data):
 # ==========================================
 
 def generer_controles_html(centre_lon, centre_lat, init_zoom=10, init_pitch=65):
-    """Génère le bloc CSS, HTML et JavaScript pour les boutons avec animations"""
+    """Génère le bloc CSS, HTML et JavaScript pour les boutons (avec animation et souris corrigée)"""
     css = """
     <style>
         #control-panel {
@@ -209,8 +209,8 @@ def generer_controles_html(centre_lon, centre_lat, init_zoom=10, init_pitch=65):
                     break;
             }}
 
-            // LA MAGIE DE L'ANIMATION EST ICI ✨
-            newViewState.transitionDuration = 800; // 800 millisecondes de glissement fluide
+            // Ajout de l'animation fluide (800ms)
+            newViewState.transitionDuration = 800;
 
             // On met à jour la vue ET on reconnecte les événements de la souris
             deckObj.setProps({{ 
@@ -227,7 +227,7 @@ def generer_carte_finale_interactive(pdk_deck_object, injection_code):
     html_pdk_brut = pdk_deck_object.to_html(as_string=True)
     html_modifie = html_pdk_brut.replace("</body>", injection_code + "\n</body>")
     
-    # PATCH DÉFINITIF
+    # PATCH DÉFINITIF pour PyDeck 0.9.1
     cible = "const deckInstance = createDeck({"
     remplacement = "const deckInstance = window.deckInstance = createDeck({"
     
