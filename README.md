@@ -42,3 +42,9 @@ The generated HTML file contains an interactive 3D map showing:
 - Satellite imagery as the base layer
 
 You can interact with the map by rotating, zooming, and panning.
+
+## Notes
+
+- Supports GPX files with multiple track segments
+- Output filename can be changed by editing `vol_3d.py` variable `OUTPUT_HTML`
+- Tested on macOS and Linux with Python 3.8+
