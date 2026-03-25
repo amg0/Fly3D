@@ -28,7 +28,106 @@
   <body>
     <div id="deck-container">
     </div>
-  </body>
+  
+    <style>
+        #control-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+        }
+        .control-group {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        #control-panel button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+            min-width: 40px;
+        }
+        #control-panel button:hover { background-color: #0056b3; }
+        #control-panel button:active { background-color: #004085; }
+        #control-panel h3 { margin: 0 0 5px 0; font-size: 16px; text-align: center; color: #333; }
+    </style>
+    
+    <div id="control-panel">
+        <h3>Caméra PyDeck</h3>
+        <div class="control-group">
+            <button onclick="changeView('zoomIn')">＋</button>
+            <button onclick="changeView('zoomOut')">－</button>
+            <span>Zoom</span>
+        </div>
+        <div class="control-group">
+            <button onclick="changeView('pitchUp')">⬆</button>
+            <button onclick="changeView('pitchDown')">⬇</button>
+            <span>Inclinaison</span>
+        </div>
+        <div class="control-group">
+            <button onclick="changeView('center')" style="width:100%;">Recentrer la vue</button>
+        </div>
+    </div>
+    
+    <script>
+        const centerPos = { longitude: 5.919003222304599, latitude: 45.18701130693572 };
+        const defaultZoom = 10;
+        const defaultPitch = 65;
+        const defaultBearing = 45;
+
+        function changeView(action) {
+            let deckObj = window.deckInstance;
+            
+            if (!deckObj) {
+                console.error("❌ Erreur : Impossible de localiser l'objet DeckGL.");
+                return;
+            }
+            
+            let currentViewState = deckObj.props.viewState || deckObj.props.initialViewState;
+            if (!currentViewState) return;
+            
+            let newViewState = { ...currentViewState };
+
+            switch (action) {
+                case 'zoomIn': newViewState.zoom += 0.8; break;
+                case 'zoomOut': newViewState.zoom -= 0.8; break;
+                case 'pitchUp': newViewState.pitch = Math.min(newViewState.pitch + 15, 85); break;
+                case 'pitchDown': newViewState.pitch = Math.max(newViewState.pitch - 15, 0); break;
+                case 'center':
+                    newViewState.longitude = centerPos.longitude;
+                    newViewState.latitude = centerPos.latitude;
+                    newViewState.zoom = defaultZoom;
+                    newViewState.pitch = defaultPitch;
+                    newViewState.bearing = defaultBearing;
+                    break;
+            }
+
+            // LA MAGIE DE L'ANIMATION EST ICI ✨
+            newViewState.transitionDuration = 800; // 800 millisecondes de glissement fluide
+
+            // On met à jour la vue ET on reconnecte les événements de la souris
+            deckObj.setProps({ 
+                viewState: newViewState,
+                onViewStateChange: ({viewState}) => deckObj.setProps({viewState: viewState})
+            });
+        }
+    </script>
+    
+</body>
   <script>
     const container = document.getElementById('deck-container');
     const jsonInput = {
@@ -49,7 +148,7 @@
         "offset": -32768,
         "rScaler": 256
       },
-      "id": "34a1f3f7-768c-44ea-baae-cfd1574d442d",
+      "id": "2c0696ec-0d21-42c1-bbe5-d300d7a0c3ff",
       "texture": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
     },
     {
@@ -8178,7 +8277,7 @@
       "getSourcePosition": "@@=depart",
       "getTargetPosition": "@@=arrivee",
       "getWidth": 2,
-      "id": "e30d3be7-22d3-468f-a654-ab2fb10481e6"
+      "id": "44168064-d4ec-4dfb-826c-205b8db7304f"
     },
     {
       "@@type": "PathLayer",
@@ -10452,7 +10551,7 @@
       "getColor": "@@=couleur",
       "getPath": "@@=trace",
       "getWidth": 5,
-      "id": "dbd43a70-b03d-4ddb-81ef-99cf4ec6af20",
+      "id": "71e87040-7a38-41eb-bbfe-bae82b2a62b8",
       "jointRounded": true,
       "widthMinPixels": 5,
       "widthScale": 20
@@ -10470,7 +10569,7 @@
     const customLibraries = null;
     const configuration = null;
 
-    const deckInstance = createDeck({
+    const deckInstance = window.deckInstance = createDeck({
                   container,
       jsonInput,
       tooltip,
