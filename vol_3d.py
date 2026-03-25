@@ -60,19 +60,17 @@ def charger_aeroports_france():
         print("⬇️ Téléchargement en cours de la base de données des aéroports...")
         df = pd.read_csv(url, low_memory=False)
         
-        # Filtre sur la France et exclusion des aéroports fermés
         df = df[df['iso_country'] == 'FR']
         df = df[df['type'] != 'closed']
         
-        # On surélève légèrement plus les aéroports pour éviter le relief 3D
         df['elevation_m'] = (df['elevation_ft'].fillna(0) * 0.3048) + 80
-        
-        # CORRECTION : Création d'une colonne étiquette 100% propre (chaîne de caractères)
-        # On prend le local_code, s'il est vide on prend ident, et on force en texte
         df['etiquette'] = df.apply(
             lambda row: str(row['local_code']) if pd.notna(row['local_code']) and str(row['local_code']).strip() != '' else str(row['ident']), 
             axis=1
         )
+        
+        # NOUVEAU : Préparation du HTML de l'infobulle pour les aéroports
+        df['tooltip_html'] = "<b>" + df['etiquette'] + "</b> - " + df['name'] + "<br/><i>Type: " + df['type'] + "</i>"
         
         def get_color(airport_type):
             if airport_type == 'large_airport': return [0, 50, 255, 120]
@@ -273,11 +271,28 @@ centre_lon, centre_lat = calculer_centre(donnees_vol_completes)
 init_zoom = 10
 init_pitch = 65
 
-# --- Préparation des couches de données ---
+# --- Préparation des données du vol ---
 
+# 1. On crée un DataFrame complet pour les points de vol (Nécessaire pour l'infobulle)
+df_points_vol = pd.DataFrame(donnees_vol_completes)
+
+# Calcul des conversions pour l'affichage (Vitesse m/s -> Noeuds, Altitude Mètres -> Pieds)
+df_points_vol['spd_kt'] = (df_points_vol['spd'] * 1.94384).astype(int)
+df_points_vol['alt_ft'] = (df_points_vol['air_alt'] * 3.28084).astype(int)
+
+# Préparation du HTML de l'infobulle pour chaque point du vol
+df_points_vol['tooltip_html'] = (
+    "<b>📍 Point de vol</b><br/>" +
+    "Altitude : " + df_points_vol['alt_ft'].astype(str) + " ft (" + df_points_vol['air_alt'].astype(int).astype(str) + " m)<br/>" +
+    "Vitesse : " + df_points_vol['spd_kt'].astype(str) + " kt<br/>" +
+    "Cap : " + df_points_vol['crs'].astype(int).astype(str) + "°"
+)
+
+# 2. Trace (Ligne Rouge Visuelle)
 ma_trace_pos = [[pt['lon'], pt['lat'], pt['air_alt']] for pt in donnees_vol_completes]
 df_trace = pd.DataFrame({"trace": [ma_trace_pos], "couleur": [[255, 50, 50]]})
 
+# 3. Ombre (Lignes verticales sous la trace)
 sources = [[pt['lon'], pt['lat'], pt['terr_alt']] for pt in donnees_vol_completes]
 cibles = [[pt['lon'], pt['lat'], pt['air_alt']] for pt in donnees_vol_completes]
 df_ombre = pd.DataFrame({
@@ -285,6 +300,7 @@ df_ombre = pd.DataFrame({
     "couleur": [[100, 100, 100, 120]] * len(donnees_vol_completes) 
 })
 
+# 4. Aéroports
 df_aeroports = charger_aeroports_france()
 
 # --- Configuration de la carte 3D ---
@@ -296,7 +312,17 @@ couche_relief = pdk.Layer("TerrainLayer", elevation_decoder=ELEVATION_DECODER, t
 couche_ombre = pdk.Layer("LineLayer", df_ombre, get_source_position="depart", get_target_position="arrivee", get_color="couleur", get_width=2)
 couche_trace = pdk.Layer("PathLayer", df_trace, get_path="trace", get_color="couleur", width_scale=20, width_min_pixels=5, get_width=5, joint_rounded=True, cap_rounded=True)
 
-liste_couches = [couche_relief, couche_ombre, couche_trace]
+# NOUVEAU : Couche invisible par-dessus la trace rouge pour capter la souris
+couche_trace_interactive = pdk.Layer(
+    "ScatterplotLayer",
+    df_points_vol,
+    get_position=['lon', 'lat', 'air_alt'],
+    get_radius=40, # Rayon de 40 mètres pour attraper facilement la souris
+    get_fill_color=[255, 255, 255, 1], # 1 = Quasiment 100% transparent, invisible à l'oeil nu
+    pickable=True, # Rend le point de vol interactif !
+)
+
+liste_couches = [couche_relief, couche_ombre, couche_trace, couche_trace_interactive]
 
 if not df_aeroports.empty:
     couche_aeroports_cercles = pdk.Layer(
@@ -316,10 +342,10 @@ if not df_aeroports.empty:
         df_aeroports,
         get_position=['longitude_deg', 'latitude_deg', 'elevation_m'],
         get_text="etiquette", 
-        get_size=10, # Taille réduite et affinée
+        get_size=10, 
         get_color=[255, 255, 255, 255], 
-        get_alignment_baseline="'bottom'", # L'ancre du texte est en bas
-        get_pixel_offset=[0, -15], # DÉCALAGE VERS LE HAUT (Ciel) pour éviter la collision 3D
+        get_alignment_baseline="'bottom'", 
+        get_pixel_offset=[0, -15], 
         pickable=False
     )
     
@@ -327,11 +353,12 @@ if not df_aeroports.empty:
 
 vue_initiale = pdk.ViewState(longitude=centre_lon, latitude=centre_lat, zoom=init_zoom, pitch=init_pitch, bearing=45)
 
+# UNIFICATION : La carte utilise maintenant la colonne 'tooltip_html' commune aux aéroports et aux points de vol
 carte_pdk = pdk.Deck(
     layers=liste_couches,
     initial_view_state=vue_initiale,
     map_provider=None,
-    tooltip={"html": "<b>{etiquette}</b> - {name}<br/><i>Type: {type}</i>"} 
+    tooltip={"html": "{tooltip_html}"} 
 )
 
 print("Génération de l'application interactive...")
