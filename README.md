@@ -41,9 +41,14 @@ pip install pydeck pandas gpxpy
 
 2. A native file selection dialog will open - select your GPX file containing flight track data.
 
-3. The script will automatically:
-   - Download the latest French airports database
-   - Process your flight data
+3. Améliorations ajoutées (2026):
+   - Relecture du vol possible avec le bouton ▶️/⏹️ dans le panneau de contrôle
+   - Ajout de commandes pour ajuster hauteur cam, zoom, pitch, et recentrage
+   - Data GPX avec description JSON (`alt`, `ele`, `spd`, `crs`) pris en charge
+
+4. Le script fera automatiquement:
+   - Télécharger la base de données des aéroports français
+   - Traiter vos données de vol
    - Generate an interactive 3D visualization
    - Open the result in your default web browser
 
