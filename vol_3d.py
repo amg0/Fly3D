@@ -602,7 +602,8 @@ donnees_aeroports = charger_aeroports_france()
 # --- Configuration de la carte 3D ---
 ELEVATION_DECODER = {"rScaler": 256, "gScaler": 1, "bScaler": 1 / 256, "offset": -32768}
 TERRAIN_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
-SATELLITE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+#SATELLITE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+SATELLITE_URL = "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
 
 couche_relief = pdk.Layer("TerrainLayer", elevation_decoder=ELEVATION_DECODER, texture=SATELLITE_URL, elevation_data=TERRAIN_URL)
 
