@@ -3,7 +3,7 @@
 ![Example](Example.png)
 
 A Python tool to visualize flight paths from GPX files in interactive 3D maps with French airports overlay.
-
+ 
 ## Features
 
 - **File Selection Dialog**: Native file picker for macOS and Windows to select GPX files
