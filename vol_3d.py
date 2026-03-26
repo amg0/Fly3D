@@ -147,6 +147,7 @@ def calculer_centre(flight_data):
 # ==========================================
 
 def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, init_pitch=65):
+    # CSS OPTIMISÉ POUR PRENDRE MOINS DE PLACE
     css = """
     <style>
         #control-panel {
@@ -155,63 +156,73 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             left: 20px;
             z-index: 1000;
             background: rgba(255, 255, 255, 0.95);
-            padding: 15px;
+            padding: 12px;
             border-radius: 8px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
             display: flex;
             flex-direction: column;
-            gap: 12px;
+            gap: 10px;
             font-family: Arial, sans-serif;
-            font-size: 14px;
-            width: 260px; /* Panneau encore un peu plus large */
+            font-size: 13px; /* Police légèrement réduite */
+            width: 210px; /* Boîte beaucoup plus fine */
         }
-        .control-group { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
-        .btn-container { display: flex; align-items: center; justify-content: center; } /* Sécurise l'alignement sur une ligne */
+        .control-group { display: flex; gap: 5px; align-items: center; justify-content: space-between; }
+        .btn-container { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+        
         #control-panel button {
             background-color: #007bff; color: white; border: none;
-            padding: 8px 12px; border-radius: 4px; cursor: pointer;
-            font-weight: bold; transition: background 0.2s; min-width: 40px;
-            user-select: none; /* Empêche le texte du bouton d'être sélectionné lors du clic prolongé */
+            padding: 6px 10px; border-radius: 4px; cursor: pointer;
+            font-weight: bold; transition: background 0.2s;
+            user-select: none;
         }
+        /* Classe spécifique pour les boutons + et - afin qu'ils soient compacts */
+        .btn-small {
+            padding: 6px 8px !important;
+            min-width: 30px !important;
+            text-align: center;
+        }
+        
         #control-panel button:hover { background-color: #0056b3; }
         #control-panel button:active { background-color: #004085; }
-        #control-panel h3 { margin: 0 0 5px 0; font-size: 16px; text-align: center; color: #333; }
-        #btn-play { background-color: #28a745; width: 100%; margin-top: 10px; }
+        #control-panel h3 { margin: 0 0 5px 0; font-size: 15px; text-align: center; color: #333; }
+        
+        #btn-play { background-color: #28a745; width: 100%; margin-top: 5px; padding: 8px; }
         #btn-play:hover { background-color: #218838; }
-        #alt-val { font-weight: bold; width: 55px; text-align: center; display: inline-block; }
+        
+        #alt-val { font-weight: bold; width: 40px; text-align: center; display: inline-block; font-size: 12px; }
     </style>
     """
     
     html = """
     <div id="control-panel">
         <h3>Caméra PyDeck</h3>
+        
         <div class="control-group">
             <span>Zoom</span>
             <div class="btn-container">
-                <button onclick="changeView('zoomOut')">－</button>
-                <div style="width: 5px;"></div>
-                <button onclick="changeView('zoomIn')">＋</button>
+                <button class="btn-small" onclick="changeView('zoomOut')">－</button>
+                <button class="btn-small" onclick="changeView('zoomIn')">＋</button>
             </div>
         </div>
+        
         <div class="control-group">
             <span>Inclinaison</span>
             <div class="btn-container">
-                <button onclick="changeView('pitchDown')">⬇</button>
-                <div style="width: 5px;"></div>
-                <button onclick="changeView('pitchUp')">⬆</button>
+                <button class="btn-small" onclick="changeView('pitchDown')">⬇</button>
+                <button class="btn-small" onclick="changeView('pitchUp')">⬆</button>
             </div>
         </div>
         
         <div class="control-group">
             <span>Hauteur Cam</span>
             <div class="btn-container">
-                <button onmousedown="startAltChange(-20)" onmouseup="stopAltChange()" onmouseleave="stopAltChange()">－</button>
+                <button class="btn-small" onmousedown="startAltChange(-20)" onmouseup="stopAltChange()" onmouseleave="stopAltChange()">－</button>
                 <span id="alt-val">10m</span>
-                <button onmousedown="startAltChange(20)" onmouseup="stopAltChange()" onmouseleave="stopAltChange()">＋</button>
+                <button class="btn-small" onmousedown="startAltChange(20)" onmouseup="stopAltChange()" onmouseleave="stopAltChange()">＋</button>
             </div>
         </div>
         
-        <button onclick="changeView('center')" style="width:100%;">Recentrer la vue</button>
+        <button onclick="changeView('center')" style="width:100%; padding: 6px;">Recentrer la vue</button>
         <hr style="width:100%; border:0; border-top:1px solid #ccc; margin: 0;">
         <button id="btn-play" onclick="toggleFlight()">▶️ Revivre le vol</button>
     </div>
@@ -229,7 +240,6 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         let altOffset = 10;
         let altInterval = null;
 
-        // Fonction pour changer la hauteur
         function changeAltOffset(delta) {{
             altOffset += delta;
             document.getElementById('alt-val').innerText = altOffset + "m";
@@ -242,21 +252,18 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
                 let currentZ = newViewState.position ? newViewState.position[2] : 0;
                 newViewState.position = [0, 0, currentZ + delta];
                 
-                // Animation très courte (100ms) pour que ça soit fluide quand on reste appuyé
                 newViewState.transitionDuration = 100; 
                 deckObj.setProps({{ viewState: newViewState }});
             }}
         }}
 
-        // Démarre la répétition quand on clique
         function startAltChange(delta) {{
-            changeAltOffset(delta); // Action immédiate au premier clic
+            changeAltOffset(delta); 
             altInterval = setInterval(() => {{
-                changeAltOffset(delta); // Répétition tant qu'on maintient appuyé
-            }}, 120); // Vitesse de répétition (120 millisecondes)
+                changeAltOffset(delta); 
+            }}, 120); 
         }}
 
-        // Arrête la répétition quand on relâche le clic (ou si la souris sort du bouton)
         function stopAltChange() {{
             if (altInterval) {{
                 clearInterval(altInterval);
