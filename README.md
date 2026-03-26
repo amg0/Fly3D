@@ -1,5 +1,7 @@
 # Fly3D
 
+![Example](Example.png)
+
 A Python tool to visualize flight paths from GPX files in interactive 3D maps with French airports overlay.
 
 ## Features
