@@ -53,9 +53,7 @@ def choisir_fichier_gpx():
 # ==========================================
 
 def charger_aeroports_france():
-    """Télécharge et filtre la base de données OurAirports à la volée (en mémoire)"""
     url = "https://davidmegginson.github.io/ourairports-data/airports.csv"
-    
     try:
         print("⬇️ Téléchargement en cours de la base de données des aéroports...")
         df = pd.read_csv(url, low_memory=False)
@@ -69,7 +67,6 @@ def charger_aeroports_france():
             axis=1
         )
         
-        # NOUVEAU : Préparation du HTML de l'infobulle pour les aéroports
         df['tooltip_html'] = "<b>" + df['etiquette'] + "</b> - " + df['name'] + "<br/><i>Type: " + df['type'] + "</i>"
         
         def get_color(airport_type):
@@ -149,7 +146,7 @@ def calculer_centre(flight_data):
 # GESTION DES BOUTONS DE CONTRÔLE CAMERA
 # ==========================================
 
-def generer_controles_html(centre_lon, centre_lat, init_zoom=10, init_pitch=65):
+def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, init_pitch=65):
     css = """
     <style>
         #control-panel {
@@ -166,16 +163,22 @@ def generer_controles_html(centre_lon, centre_lat, init_zoom=10, init_pitch=65):
             gap: 12px;
             font-family: Arial, sans-serif;
             font-size: 14px;
+            width: 260px; /* Panneau encore un peu plus large */
         }
-        .control-group { display: flex; gap: 8px; align-items: center; }
+        .control-group { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+        .btn-container { display: flex; align-items: center; justify-content: center; } /* Sécurise l'alignement sur une ligne */
         #control-panel button {
             background-color: #007bff; color: white; border: none;
             padding: 8px 12px; border-radius: 4px; cursor: pointer;
             font-weight: bold; transition: background 0.2s; min-width: 40px;
+            user-select: none; /* Empêche le texte du bouton d'être sélectionné lors du clic prolongé */
         }
         #control-panel button:hover { background-color: #0056b3; }
         #control-panel button:active { background-color: #004085; }
         #control-panel h3 { margin: 0 0 5px 0; font-size: 16px; text-align: center; color: #333; }
+        #btn-play { background-color: #28a745; width: 100%; margin-top: 10px; }
+        #btn-play:hover { background-color: #218838; }
+        #alt-val { font-weight: bold; width: 55px; text-align: center; display: inline-block; }
     </style>
     """
     
@@ -183,20 +186,38 @@ def generer_controles_html(centre_lon, centre_lat, init_zoom=10, init_pitch=65):
     <div id="control-panel">
         <h3>Caméra PyDeck</h3>
         <div class="control-group">
-            <button onclick="changeView('zoomIn')">＋</button>
-            <button onclick="changeView('zoomOut')">－</button>
             <span>Zoom</span>
+            <div class="btn-container">
+                <button onclick="changeView('zoomOut')">－</button>
+                <div style="width: 5px;"></div>
+                <button onclick="changeView('zoomIn')">＋</button>
+            </div>
         </div>
         <div class="control-group">
-            <button onclick="changeView('pitchUp')">⬆</button>
-            <button onclick="changeView('pitchDown')">⬇</button>
             <span>Inclinaison</span>
+            <div class="btn-container">
+                <button onclick="changeView('pitchDown')">⬇</button>
+                <div style="width: 5px;"></div>
+                <button onclick="changeView('pitchUp')">⬆</button>
+            </div>
         </div>
+        
         <div class="control-group">
-            <button onclick="changeView('center')" style="width:100%;">Recentrer la vue</button>
+            <span>Hauteur Cam</span>
+            <div class="btn-container">
+                <button onmousedown="startAltChange(-20)" onmouseup="stopAltChange()" onmouseleave="stopAltChange()">－</button>
+                <span id="alt-val">10m</span>
+                <button onmousedown="startAltChange(20)" onmouseup="stopAltChange()" onmouseleave="stopAltChange()">＋</button>
+            </div>
         </div>
+        
+        <button onclick="changeView('center')" style="width:100%;">Recentrer la vue</button>
+        <hr style="width:100%; border:0; border-top:1px solid #ccc; margin: 0;">
+        <button id="btn-play" onclick="toggleFlight()">▶️ Revivre le vol</button>
     </div>
     """
+    
+    vol_json = json.dumps(donnees_vol)
     
     js = f"""
     <script>
@@ -205,9 +226,48 @@ def generer_controles_html(centre_lon, centre_lat, init_zoom=10, init_pitch=65):
         const defaultPitch = {init_pitch};
         const defaultBearing = 45;
 
+        let altOffset = 10;
+        let altInterval = null;
+
+        // Fonction pour changer la hauteur
+        function changeAltOffset(delta) {{
+            altOffset += delta;
+            document.getElementById('alt-val').innerText = altOffset + "m";
+            
+            let deckObj = window.deckInstance;
+            if (deckObj && !isFlying) {{
+                let currentViewState = deckObj.props.viewState || deckObj.props.initialViewState;
+                let newViewState = {{ ...currentViewState }};
+                
+                let currentZ = newViewState.position ? newViewState.position[2] : 0;
+                newViewState.position = [0, 0, currentZ + delta];
+                
+                // Animation très courte (100ms) pour que ça soit fluide quand on reste appuyé
+                newViewState.transitionDuration = 100; 
+                deckObj.setProps({{ viewState: newViewState }});
+            }}
+        }}
+
+        // Démarre la répétition quand on clique
+        function startAltChange(delta) {{
+            changeAltOffset(delta); // Action immédiate au premier clic
+            altInterval = setInterval(() => {{
+                changeAltOffset(delta); // Répétition tant qu'on maintient appuyé
+            }}, 120); // Vitesse de répétition (120 millisecondes)
+        }}
+
+        // Arrête la répétition quand on relâche le clic (ou si la souris sort du bouton)
+        function stopAltChange() {{
+            if (altInterval) {{
+                clearInterval(altInterval);
+                altInterval = null;
+            }}
+        }}
+
         function changeView(action) {{
             let deckObj = window.deckInstance;
             if (!deckObj) return;
+            if (isFlying) toggleFlight(); 
             
             let currentViewState = deckObj.props.viewState || deckObj.props.initialViewState;
             if (!currentViewState) return;
@@ -221,6 +281,7 @@ def generer_controles_html(centre_lon, centre_lat, init_zoom=10, init_pitch=65):
                 case 'center':
                     newViewState.longitude = centerPos.longitude;
                     newViewState.latitude = centerPos.latitude;
+                    newViewState.position = [0, 0, 0]; 
                     newViewState.zoom = defaultZoom;
                     newViewState.pitch = defaultPitch;
                     newViewState.bearing = defaultBearing;
@@ -232,6 +293,144 @@ def generer_controles_html(centre_lon, centre_lat, init_zoom=10, init_pitch=65):
                 viewState: newViewState,
                 onViewStateChange: ({{viewState}}) => deckObj.setProps({{viewState: viewState}})
             }});
+        }}
+
+        const flightData = {vol_json};
+        let segments = [];
+        let totalDist = 0;
+
+        function calcDist(p1, p2) {{
+            let R = 6371e3; 
+            let lat1 = p1.lat * Math.PI/180;
+            let lat2 = p2.lat * Math.PI/180;
+            let dLat = (p2.lat-p1.lat) * Math.PI/180;
+            let dLon = (p2.lon-p1.lon) * Math.PI/180;
+            let a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            let c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }}
+
+        function calcBearing(p1, p2) {{
+            let lat1 = p1.lat * Math.PI/180;
+            let lat2 = p2.lat * Math.PI/180;
+            let dLon = (p2.lon - p1.lon) * Math.PI/180;
+            let y = Math.sin(dLon) * Math.cos(lat2);
+            let x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+            let brng = Math.atan2(y, x) * 180 / Math.PI;
+            return (brng + 360) % 360;
+        }}
+        
+        for(let i = 0; i < flightData.length - 1; i++) {{
+            let p1 = flightData[i];
+            let p2 = flightData[i+1];
+            let dist = calcDist(p1, p2);
+            let brng = calcBearing(p1, p2); 
+            
+            segments.push({{p1: p1, p2: p2, dist: dist, brng: brng}});
+            totalDist += dist;
+        }}
+
+        let isFlying = false;
+        let flownDist = 0;
+        let lastTime = 0;
+        let animFrame;
+        let currentBrng = null;
+        let currentZoom = 15.5; 
+        let currentSegIdx = 0;
+        let currentSegAccum = 0;
+
+        function getPointAtDist(targetDist, startIdx, startAccum) {{
+            if (targetDist >= totalDist) return {{ pos: segments[segments.length - 1].p2, idx: segments.length - 1, accum: totalDist }};
+            let d = startAccum;
+            for (let i = startIdx; i < segments.length; i++) {{
+                if (d + segments[i].dist >= targetDist) {{
+                    let prog = segments[i].dist > 0 ? (targetDist - d) / segments[i].dist : 0;
+                    return {{
+                        pos: {{
+                            lon: segments[i].p1.lon + (segments[i].p2.lon - segments[i].p1.lon) * prog,
+                            lat: segments[i].p1.lat + (segments[i].p2.lat - segments[i].p1.lat) * prog,
+                            alt: segments[i].p1.air_alt + (segments[i].p2.air_alt - segments[i].p1.air_alt) * prog
+                        }},
+                        idx: i,
+                        accum: d,
+                        brng: segments[i].brng
+                    }};
+                }}
+                d += segments[i].dist;
+            }}
+            return {{ pos: segments[segments.length - 1].p2, idx: segments.length - 1, accum: d, brng: segments[segments.length - 1].brng }};
+        }}
+
+        function toggleFlight() {{
+            let btn = document.getElementById('btn-play');
+            if (isFlying) {{
+                isFlying = false;
+                cancelAnimationFrame(animFrame);
+                btn.innerHTML = "▶️ Revivre le vol";
+                btn.style.backgroundColor = "#28a745"; 
+                lastTime = 0;
+            }} else {{
+                isFlying = true;
+                btn.innerHTML = "⏹️ Arrêter le vol";
+                btn.style.backgroundColor = "#dc3545"; 
+                if (flownDist >= totalDist) {{
+                    flownDist = 0;
+                    currentSegIdx = 0;
+                    currentSegAccum = 0;
+                    currentBrng = null;
+                }}
+                animFrame = requestAnimationFrame(animateFlight);
+            }}
+        }}
+
+        function animateFlight(time) {{
+            if (!isFlying) return;
+            if (!lastTime) lastTime = time;
+            let dt = time - lastTime;
+            lastTime = time;
+            
+            let speed = totalDist / 90000; 
+            flownDist += speed * dt;
+            
+            if (flownDist >= totalDist) {{
+                toggleFlight();
+                return;
+            }}
+            
+            let curState = getPointAtDist(flownDist, currentSegIdx, currentSegAccum);
+            currentSegIdx = curState.idx;
+            currentSegAccum = curState.accum;
+            let curPos = curState.pos;
+
+            let targetBrng = curState.brng;
+
+            if (currentBrng === null) currentBrng = targetBrng;
+            let diff = targetBrng - currentBrng;
+            while (diff <= -180) diff += 360;
+            while (diff > 180) diff -= 360;
+            currentBrng += diff * Math.min(1.0, dt * 0.006); 
+            while (currentBrng < 0) currentBrng += 360;
+            while (currentBrng >= 360) currentBrng -= 360;
+
+            let targetZoom = 16 - (curPos.alt / 1500); 
+            if (targetZoom < 12) targetZoom = 12; 
+            if (targetZoom > 17) targetZoom = 17; 
+            currentZoom += (targetZoom - currentZoom) * Math.min(1.0, dt * 0.002);
+
+            window.deckInstance.setProps({{
+                viewState: {{
+                    longitude: curPos.lon,
+                    latitude: curPos.lat,
+                    position: [0, 0, curPos.alt + altOffset], 
+                    zoom: currentZoom,
+                    pitch: 82, 
+                    bearing: currentBrng,
+                    transitionDuration: 0 
+                }},
+                onViewStateChange: ({{viewState}}) => window.deckInstance.setProps({{viewState: viewState}})
+            }});
+            
+            animFrame = requestAnimationFrame(animateFlight);
         }}
     </script>
     """
@@ -273,14 +472,10 @@ init_pitch = 65
 
 # --- Préparation des données du vol ---
 
-# 1. On crée un DataFrame complet pour les points de vol (Nécessaire pour l'infobulle)
 df_points_vol = pd.DataFrame(donnees_vol_completes)
-
-# Calcul des conversions pour l'affichage (Vitesse m/s -> Noeuds, Altitude Mètres -> Pieds)
 df_points_vol['spd_kt'] = (df_points_vol['spd'] * 1.94384).astype(int)
 df_points_vol['alt_ft'] = (df_points_vol['air_alt'] * 3.28084).astype(int)
 
-# Préparation du HTML de l'infobulle pour chaque point du vol
 df_points_vol['tooltip_html'] = (
     "<b>📍 Point de vol</b><br/>" +
     "Altitude : " + df_points_vol['alt_ft'].astype(str) + " ft (" + df_points_vol['air_alt'].astype(int).astype(str) + " m)<br/>" +
@@ -288,11 +483,9 @@ df_points_vol['tooltip_html'] = (
     "Cap : " + df_points_vol['crs'].astype(int).astype(str) + "°"
 )
 
-# 2. Trace (Ligne Rouge Visuelle)
 ma_trace_pos = [[pt['lon'], pt['lat'], pt['air_alt']] for pt in donnees_vol_completes]
 df_trace = pd.DataFrame({"trace": [ma_trace_pos], "couleur": [[255, 50, 50]]})
 
-# 3. Ombre (Lignes verticales sous la trace)
 sources = [[pt['lon'], pt['lat'], pt['terr_alt']] for pt in donnees_vol_completes]
 cibles = [[pt['lon'], pt['lat'], pt['air_alt']] for pt in donnees_vol_completes]
 df_ombre = pd.DataFrame({
@@ -300,7 +493,6 @@ df_ombre = pd.DataFrame({
     "couleur": [[100, 100, 100, 120]] * len(donnees_vol_completes) 
 })
 
-# 4. Aéroports
 df_aeroports = charger_aeroports_france()
 
 # --- Configuration de la carte 3D ---
@@ -312,14 +504,13 @@ couche_relief = pdk.Layer("TerrainLayer", elevation_decoder=ELEVATION_DECODER, t
 couche_ombre = pdk.Layer("LineLayer", df_ombre, get_source_position="depart", get_target_position="arrivee", get_color="couleur", get_width=2)
 couche_trace = pdk.Layer("PathLayer", df_trace, get_path="trace", get_color="couleur", width_scale=20, width_min_pixels=5, get_width=5, joint_rounded=True, cap_rounded=True)
 
-# NOUVEAU : Couche invisible par-dessus la trace rouge pour capter la souris
 couche_trace_interactive = pdk.Layer(
     "ScatterplotLayer",
     df_points_vol,
     get_position=['lon', 'lat', 'air_alt'],
-    get_radius=40, # Rayon de 40 mètres pour attraper facilement la souris
-    get_fill_color=[255, 255, 255, 1], # 1 = Quasiment 100% transparent, invisible à l'oeil nu
-    pickable=True, # Rend le point de vol interactif !
+    get_radius=40,
+    get_fill_color=[255, 255, 255, 1], 
+    pickable=True, 
 )
 
 liste_couches = [couche_relief, couche_ombre, couche_trace, couche_trace_interactive]
@@ -342,7 +533,7 @@ if not df_aeroports.empty:
         df_aeroports,
         get_position=['longitude_deg', 'latitude_deg', 'elevation_m'],
         get_text="etiquette", 
-        get_size=10, 
+        get_size=12, 
         get_color=[255, 255, 255, 255], 
         get_alignment_baseline="'bottom'", 
         get_pixel_offset=[0, -15], 
@@ -353,7 +544,6 @@ if not df_aeroports.empty:
 
 vue_initiale = pdk.ViewState(longitude=centre_lon, latitude=centre_lat, zoom=init_zoom, pitch=init_pitch, bearing=45)
 
-# UNIFICATION : La carte utilise maintenant la colonne 'tooltip_html' commune aux aéroports et aux points de vol
 carte_pdk = pdk.Deck(
     layers=liste_couches,
     initial_view_state=vue_initiale,
@@ -362,7 +552,7 @@ carte_pdk = pdk.Deck(
 )
 
 print("Génération de l'application interactive...")
-code_injection = generer_controles_html(centre_lon, centre_lat, init_zoom, init_pitch)
+code_injection = generer_controles_html(centre_lon, centre_lat, donnees_vol_completes, init_zoom, init_pitch)
 html_application_finale = generer_carte_finale_interactive(carte_pdk, code_injection)
 
 fichier_sortie = "mon_application_vol_3d.html"
