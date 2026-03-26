@@ -58,8 +58,10 @@ def charger_aeroports_france():
         print("⬇️ Téléchargement en cours de la base de données des aéroports...")
         df = pd.read_csv(url, low_memory=False)
         
+        # Nettoyage des données pour éviter les variables vides
         df = df[df['iso_country'] == 'FR']
         df = df[df['type'] != 'closed']
+        df = df.dropna(subset=['longitude_deg', 'latitude_deg'])
         
         df['elevation_m'] = (df['elevation_ft'].fillna(0) * 0.3048) + 80
         df['etiquette'] = df.apply(
@@ -84,12 +86,26 @@ def charger_aeroports_france():
         df['couleur'] = df['type'].apply(get_color)
         df['rayon'] = df['type'].apply(get_radius)
         
-        print(f"✅ {len(df)} aéroports/aérodromes français chargés avec succès.")
-        return df
+        # SOLUTION ANTI-PLANTAGE WINDOWS : On convertit le DataFrame en objets Python purs
+        records = df.to_dict(orient='records')
+        clean_records = []
+        for r in records:
+            clean_records.append({
+                'longitude_deg': float(r['longitude_deg']),
+                'latitude_deg': float(r['latitude_deg']),
+                'elevation_m': float(r['elevation_m']),
+                'couleur': r['couleur'],
+                'rayon': int(r['rayon']),
+                'etiquette': str(r['etiquette']),
+                'tooltip_html': str(r['tooltip_html'])
+            })
+            
+        print(f"✅ {len(clean_records)} aéroports/aérodromes français chargés avec succès.")
+        return clean_records
         
     except Exception as e:
         print(f"⚠️ Impossible de charger les aéroports : {e}")
-        return pd.DataFrame()
+        return []
 
 def lire_gpx_universel(chemin_fichier):
     donnees_vol = []
@@ -137,9 +153,9 @@ def lire_gpx_universel(chemin_fichier):
 
 def calculer_centre(flight_data):
     if not flight_data:
-        return 0, 0
-    avg_lon = sum(pt['lon'] for pt in flight_data) / len(flight_data)
-    avg_lat = sum(pt['lat'] for pt in flight_data) / len(flight_data)
+        return 0.0, 0.0
+    avg_lon = float(sum(pt['lon'] for pt in flight_data) / len(flight_data))
+    avg_lat = float(sum(pt['lat'] for pt in flight_data) / len(flight_data))
     return avg_lon, avg_lat
 
 # ==========================================
@@ -247,7 +263,7 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         let altOffset = 10;
         let altInterval = null;
         let speedMultiplier = 1.0;
-        let speedInterval = null; // Nouvelle variable pour la minuterie de vitesse
+        let speedInterval = null; 
 
         function customViewStateChange({{viewState}}) {{
             let deckObj = window.deckInstance;
@@ -265,7 +281,6 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             deckObj.setProps({{viewState: viewState}});
         }}
 
-        // --- GESTION DE LA HAUTEUR ---
         function changeAltOffset(delta) {{
             altOffset += delta;
             document.getElementById('alt-val').innerText = altOffset + "m";
@@ -301,7 +316,6 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             }}
         }}
 
-        // --- GESTION DE LA VITESSE AVEC REPEAT ---
         function changeSpeed(delta) {{
             speedMultiplier = Math.round((speedMultiplier + delta) * 100) / 100;
             if (speedMultiplier < 0.25) speedMultiplier = 0.25;
@@ -312,10 +326,10 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         }}
 
         function startSpeedChange(delta) {{
-            changeSpeed(delta); // Action au clic initial
+            changeSpeed(delta); 
             speedInterval = setInterval(() => {{
-                changeSpeed(delta); // Répétition
-            }}, 150); // Un tout petit peu plus lent que la hauteur pour ne pas zapper trop vite
+                changeSpeed(delta); 
+            }}, 150); 
         }}
 
         function stopSpeedChange() {{
@@ -325,7 +339,6 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             }}
         }}
 
-        // --- GESTION DES BOUTONS DE CAMÉRA ---
         function changeView(action) {{
             let deckObj = window.deckInstance;
             if (!deckObj) return;
@@ -549,30 +562,42 @@ centre_lon, centre_lat = calculer_centre(donnees_vol_completes)
 init_zoom = 10
 init_pitch = 65
 
-# --- Préparation des données du vol ---
+# --- Préparation des données du vol en Python Pur (Bypass de Pandas pour compatibilité Windows) ---
 
-df_points_vol = pd.DataFrame(donnees_vol_completes)
-df_points_vol['spd_kt'] = (df_points_vol['spd'] * 1.94384).astype(int)
-df_points_vol['alt_ft'] = (df_points_vol['air_alt'] * 3.28084).astype(int)
+donnees_points_vol = []
+ma_trace_pos = []
+donnees_ombre = []
 
-df_points_vol['tooltip_html'] = (
-    "<b>📍 Point de vol</b><br/>" +
-    "Altitude : " + df_points_vol['alt_ft'].astype(str) + " ft (" + df_points_vol['air_alt'].astype(int).astype(str) + " m)<br/>" +
-    "Vitesse : " + df_points_vol['spd_kt'].astype(str) + " kt<br/>" +
-    "Cap : " + df_points_vol['crs'].astype(int).astype(str) + "°"
-)
+for pt in donnees_vol_completes:
+    spd_kt = int(pt['spd'] * 1.94384)
+    alt_ft = int(pt['air_alt'] * 3.28084)
+    crs = int(pt['crs'])
+    
+    # Casting explicite en Python Standard
+    lon = float(pt['lon'])
+    lat = float(pt['lat'])
+    air_alt = float(pt['air_alt'])
+    terr_alt = float(pt['terr_alt'])
+    
+    tooltip = f"<b>📍 Point de vol</b><br/>Altitude : {alt_ft} ft ({int(air_alt)} m)<br/>Vitesse : {spd_kt} kt<br/>Cap : {crs}°"
+    
+    donnees_points_vol.append({
+        'lon': lon,
+        'lat': lat,
+        'air_alt': air_alt,
+        'tooltip_html': tooltip
+    })
+    
+    ma_trace_pos.append([lon, lat, air_alt])
+    
+    donnees_ombre.append({
+        "depart": [lon, lat, terr_alt],
+        "arrivee": [lon, lat, air_alt],
+        "couleur": [100, 100, 100, 120]
+    })
 
-ma_trace_pos = [[pt['lon'], pt['lat'], pt['air_alt']] for pt in donnees_vol_completes]
-df_trace = pd.DataFrame({"trace": [ma_trace_pos], "couleur": [[255, 50, 50]]})
-
-sources = [[pt['lon'], pt['lat'], pt['terr_alt']] for pt in donnees_vol_completes]
-cibles = [[pt['lon'], pt['lat'], pt['air_alt']] for pt in donnees_vol_completes]
-df_ombre = pd.DataFrame({
-    "depart": sources, "arrivee": cibles, 
-    "couleur": [[100, 100, 100, 120]] * len(donnees_vol_completes) 
-})
-
-df_aeroports = charger_aeroports_france()
+donnees_trace = [{"trace": ma_trace_pos, "couleur": [255, 50, 50]}]
+donnees_aeroports = charger_aeroports_france()
 
 # --- Configuration de la carte 3D ---
 ELEVATION_DECODER = {"rScaler": 256, "gScaler": 1, "bScaler": 1 / 256, "offset": -32768}
@@ -580,12 +605,31 @@ TERRAIN_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{
 SATELLITE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 
 couche_relief = pdk.Layer("TerrainLayer", elevation_decoder=ELEVATION_DECODER, texture=SATELLITE_URL, elevation_data=TERRAIN_URL)
-couche_ombre = pdk.Layer("LineLayer", df_ombre, get_source_position="depart", get_target_position="arrivee", get_color="couleur", get_width=2)
-couche_trace = pdk.Layer("PathLayer", df_trace, get_path="trace", get_color="couleur", width_scale=20, width_min_pixels=5, get_width=5, joint_rounded=True, cap_rounded=True)
+
+couche_ombre = pdk.Layer(
+    "LineLayer", 
+    donnees_ombre, 
+    get_source_position="depart", 
+    get_target_position="arrivee", 
+    get_color="couleur", 
+    get_width=2
+)
+
+couche_trace = pdk.Layer(
+    "PathLayer", 
+    donnees_trace, 
+    get_path="trace", 
+    get_color="couleur", 
+    width_scale=20, 
+    width_min_pixels=5, 
+    get_width=5, 
+    joint_rounded=True, 
+    cap_rounded=True
+)
 
 couche_trace_interactive = pdk.Layer(
     "ScatterplotLayer",
-    df_points_vol,
+    donnees_points_vol,
     get_position=['lon', 'lat', 'air_alt'],
     get_radius=40,
     get_fill_color=[255, 255, 255, 1], 
@@ -594,10 +638,10 @@ couche_trace_interactive = pdk.Layer(
 
 liste_couches = [couche_relief, couche_ombre, couche_trace, couche_trace_interactive]
 
-if not df_aeroports.empty:
+if donnees_aeroports:
     couche_aeroports_cercles = pdk.Layer(
         "ScatterplotLayer",
-        df_aeroports,
+        donnees_aeroports,
         get_position=['longitude_deg', 'latitude_deg', 'elevation_m'],
         get_fill_color='couleur',
         get_radius='rayon',
@@ -609,7 +653,7 @@ if not df_aeroports.empty:
     
     couche_aeroports_textes = pdk.Layer(
         "TextLayer",
-        df_aeroports,
+        donnees_aeroports,
         get_position=['longitude_deg', 'latitude_deg', 'elevation_m'],
         get_text="etiquette", 
         get_size=12, 
