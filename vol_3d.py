@@ -147,7 +147,6 @@ def calculer_centre(flight_data):
 # ==========================================
 
 def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, init_pitch=65):
-    # CSS OPTIMISÉ POUR PRENDRE MOINS DE PLACE
     css = """
     <style>
         #control-panel {
@@ -163,8 +162,8 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             flex-direction: column;
             gap: 10px;
             font-family: Arial, sans-serif;
-            font-size: 13px; /* Police légèrement réduite */
-            width: 210px; /* Boîte beaucoup plus fine */
+            font-size: 13px; 
+            width: 220px;
         }
         .control-group { display: flex; gap: 5px; align-items: center; justify-content: space-between; }
         .btn-container { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
@@ -175,7 +174,6 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             font-weight: bold; transition: background 0.2s;
             user-select: none;
         }
-        /* Classe spécifique pour les boutons + et - afin qu'ils soient compacts */
         .btn-small {
             padding: 6px 8px !important;
             min-width: 30px !important;
@@ -189,7 +187,7 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         #btn-play { background-color: #28a745; width: 100%; margin-top: 5px; padding: 8px; }
         #btn-play:hover { background-color: #218838; }
         
-        #alt-val { font-weight: bold; width: 40px; text-align: center; display: inline-block; font-size: 12px; }
+        .val-display { font-weight: bold; width: 45px; text-align: center; display: inline-block; font-size: 12px; }
     </style>
     """
     
@@ -217,8 +215,17 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             <span>Hauteur Cam</span>
             <div class="btn-container">
                 <button class="btn-small" onmousedown="startAltChange(-20)" onmouseup="stopAltChange()" onmouseleave="stopAltChange()">－</button>
-                <span id="alt-val">10m</span>
+                <span id="alt-val" class="val-display">10m</span>
                 <button class="btn-small" onmousedown="startAltChange(20)" onmouseup="stopAltChange()" onmouseleave="stopAltChange()">＋</button>
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <span>Vitesse</span>
+            <div class="btn-container">
+                <button class="btn-small" onmousedown="startSpeedChange(-0.25)" onmouseup="stopSpeedChange()" onmouseleave="stopSpeedChange()">－</button>
+                <span id="speed-val" class="val-display">1x</span>
+                <button class="btn-small" onmousedown="startSpeedChange(0.25)" onmouseup="stopSpeedChange()" onmouseleave="stopSpeedChange()">＋</button>
             </div>
         </div>
         
@@ -239,7 +246,26 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
 
         let altOffset = 10;
         let altInterval = null;
+        let speedMultiplier = 1.0;
+        let speedInterval = null; // Nouvelle variable pour la minuterie de vitesse
 
+        function customViewStateChange({{viewState}}) {{
+            let deckObj = window.deckInstance;
+            let currentZ = 0;
+            
+            if (deckObj && deckObj.props.viewState && deckObj.props.viewState.position) {{
+                currentZ = deckObj.props.viewState.position[2];
+            }} else if (deckObj && deckObj.props.initialViewState && deckObj.props.initialViewState.position) {{
+                currentZ = deckObj.props.initialViewState.position[2];
+            }}
+            
+            viewState.position = [0, 0, currentZ];
+            viewState.maxPitch = 89; 
+            
+            deckObj.setProps({{viewState: viewState}});
+        }}
+
+        // --- GESTION DE LA HAUTEUR ---
         function changeAltOffset(delta) {{
             altOffset += delta;
             document.getElementById('alt-val').innerText = altOffset + "m";
@@ -251,9 +277,13 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
                 
                 let currentZ = newViewState.position ? newViewState.position[2] : 0;
                 newViewState.position = [0, 0, currentZ + delta];
+                newViewState.maxPitch = 89; 
                 
                 newViewState.transitionDuration = 100; 
-                deckObj.setProps({{ viewState: newViewState }});
+                deckObj.setProps({{ 
+                    viewState: newViewState,
+                    onViewStateChange: customViewStateChange
+                }});
             }}
         }}
 
@@ -271,6 +301,31 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             }}
         }}
 
+        // --- GESTION DE LA VITESSE AVEC REPEAT ---
+        function changeSpeed(delta) {{
+            speedMultiplier = Math.round((speedMultiplier + delta) * 100) / 100;
+            if (speedMultiplier < 0.25) speedMultiplier = 0.25;
+            if (speedMultiplier > 5.0) speedMultiplier = 5.0;
+            
+            let displayValue = Number.isInteger(speedMultiplier) ? speedMultiplier + "x" : speedMultiplier.toFixed(2) + "x";
+            document.getElementById('speed-val').innerText = displayValue;
+        }}
+
+        function startSpeedChange(delta) {{
+            changeSpeed(delta); // Action au clic initial
+            speedInterval = setInterval(() => {{
+                changeSpeed(delta); // Répétition
+            }}, 150); // Un tout petit peu plus lent que la hauteur pour ne pas zapper trop vite
+        }}
+
+        function stopSpeedChange() {{
+            if (speedInterval) {{
+                clearInterval(speedInterval);
+                speedInterval = null;
+            }}
+        }}
+
+        // --- GESTION DES BOUTONS DE CAMÉRA ---
         function changeView(action) {{
             let deckObj = window.deckInstance;
             if (!deckObj) return;
@@ -279,11 +334,12 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             let currentViewState = deckObj.props.viewState || deckObj.props.initialViewState;
             if (!currentViewState) return;
             let newViewState = {{ ...currentViewState }};
+            newViewState.maxPitch = 89; 
 
             switch (action) {{
                 case 'zoomIn': newViewState.zoom += 0.8; break;
                 case 'zoomOut': newViewState.zoom -= 0.8; break;
-                case 'pitchUp': newViewState.pitch = Math.min(newViewState.pitch + 15, 85); break;
+                case 'pitchUp': newViewState.pitch = Math.min(newViewState.pitch + 15, 89); break; 
                 case 'pitchDown': newViewState.pitch = Math.max(newViewState.pitch - 15, 0); break;
                 case 'center':
                     newViewState.longitude = centerPos.longitude;
@@ -298,7 +354,7 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             newViewState.transitionDuration = 800; 
             deckObj.setProps({{ 
                 viewState: newViewState,
-                onViewStateChange: ({{viewState}}) => deckObj.setProps({{viewState: viewState}})
+                onViewStateChange: customViewStateChange 
             }});
         }}
 
@@ -370,12 +426,24 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
 
         function toggleFlight() {{
             let btn = document.getElementById('btn-play');
+            let deckObj = window.deckInstance;
+            
             if (isFlying) {{
                 isFlying = false;
                 cancelAnimationFrame(animFrame);
                 btn.innerHTML = "▶️ Revivre le vol";
                 btn.style.backgroundColor = "#28a745"; 
                 lastTime = 0;
+                
+                if (deckObj && deckObj.props.viewState) {{
+                    let finalState = {{ ...deckObj.props.viewState }};
+                    finalState.transitionDuration = 0;
+                    finalState.maxPitch = 89; 
+                    deckObj.setProps({{
+                        viewState: finalState,
+                        onViewStateChange: customViewStateChange
+                    }});
+                }}
             }} else {{
                 isFlying = true;
                 btn.innerHTML = "⏹️ Arrêter le vol";
@@ -396,8 +464,9 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             let dt = time - lastTime;
             lastTime = time;
             
-            let speed = totalDist / 90000; 
-            flownDist += speed * dt;
+            let baseSpeed = totalDist / 150000; 
+            let currentFlightSpeed = baseSpeed * speedMultiplier;
+            flownDist += currentFlightSpeed * dt;
             
             if (flownDist >= totalDist) {{
                 toggleFlight();
@@ -415,7 +484,9 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             let diff = targetBrng - currentBrng;
             while (diff <= -180) diff += 360;
             while (diff > 180) diff -= 360;
-            currentBrng += diff * Math.min(1.0, dt * 0.006); 
+            
+            let rotationSpeed = 0.006 * Math.max(1.0, Math.sqrt(speedMultiplier));
+            currentBrng += diff * Math.min(1.0, dt * rotationSpeed); 
             while (currentBrng < 0) currentBrng += 360;
             while (currentBrng >= 360) currentBrng -= 360;
 
@@ -431,10 +502,11 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
                     position: [0, 0, curPos.alt + altOffset], 
                     zoom: currentZoom,
                     pitch: 82, 
+                    maxPitch: 89, 
                     bearing: currentBrng,
                     transitionDuration: 0 
                 }},
-                onViewStateChange: ({{viewState}}) => window.deckInstance.setProps({{viewState: viewState}})
+                onViewStateChange: customViewStateChange 
             }});
             
             animFrame = requestAnimationFrame(animateFlight);
@@ -549,7 +621,7 @@ if not df_aeroports.empty:
     
     liste_couches.extend([couche_aeroports_cercles, couche_aeroports_textes])
 
-vue_initiale = pdk.ViewState(longitude=centre_lon, latitude=centre_lat, zoom=init_zoom, pitch=init_pitch, bearing=45)
+vue_initiale = pdk.ViewState(longitude=centre_lon, latitude=centre_lat, zoom=init_zoom, pitch=init_pitch, max_pitch=89, bearing=45)
 
 carte_pdk = pdk.Deck(
     layers=liste_couches,
