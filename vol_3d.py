@@ -6,9 +6,10 @@ import webbrowser
 import subprocess
 import platform
 import json
+import math
 
 # ==========================================
-# FONCTIONS DE SÉLECTION DE FICHIER 
+# FONCTIONS DE SÉLECTION DE FICHIER
 # ==========================================
 
 def choisir_fichier_gpx_mac():
@@ -19,7 +20,7 @@ def choisir_fichier_gpx_mac():
     '''
     try:
         resultat = subprocess.run(
-            ['osascript', '-e', script_apple], 
+            ['osascript', '-e', script_apple],
             capture_output=True, text=True, check=True
         )
         return resultat.stdout.strip()
@@ -33,7 +34,7 @@ def choisir_fichier_gpx_windows():
     
     root = tk.Tk()
     root.withdraw()
-    root.attributes('-topmost', True) 
+    root.attributes('-topmost', True)
     
     fichier = filedialog.askopenfilename(
         title="Sélectionnez votre trace ou route SDVFR (fichier .gpx)",
@@ -58,14 +59,14 @@ def charger_aeroports_france():
         print("⬇️ Téléchargement en cours de la base de données des aéroports...")
         df = pd.read_csv(url, low_memory=False)
         
-        # Nettoyage des données pour éviter les variables vides
         df = df[df['iso_country'] == 'FR']
         df = df[df['type'] != 'closed']
         df = df.dropna(subset=['longitude_deg', 'latitude_deg'])
         
         df['elevation_m'] = (df['elevation_ft'].fillna(0) * 0.3048) + 80
+        
         df['etiquette'] = df.apply(
-            lambda row: str(row['local_code']) if pd.notna(row['local_code']) and str(row['local_code']).strip() != '' else str(row['ident']), 
+            lambda row: str(row['local_code']) if pd.notna(row['local_code']) and str(row['local_code']).strip() != '' else str(row['ident']),
             axis=1
         )
         
@@ -86,7 +87,6 @@ def charger_aeroports_france():
         df['couleur'] = df['type'].apply(get_color)
         df['rayon'] = df['type'].apply(get_radius)
         
-        # SOLUTION ANTI-PLANTAGE WINDOWS : On convertit le DataFrame en objets Python purs
         records = df.to_dict(orient='records')
         clean_records = []
         for r in records:
@@ -123,7 +123,7 @@ def lire_gpx_universel(chemin_fichier):
                 
             for point in points_bruts:
                 air_alt = point.elevation if point.elevation is not None else 0
-                terr_alt = 0  
+                terr_alt = 0
                 spd = 0
                 crs = 0
                 
@@ -179,7 +179,7 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             gap: 10px;
             font-family: Arial, sans-serif;
             font-size: 13px; 
-            width: 220px;
+            width: 210px; 
         }
         .control-group { display: flex; gap: 5px; align-items: center; justify-content: space-between; }
         .btn-container { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
@@ -203,7 +203,25 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         #btn-play { background-color: #28a745; width: 100%; margin-top: 5px; padding: 8px; }
         #btn-play:hover { background-color: #218838; }
         
-        .val-display { font-weight: bold; width: 45px; text-align: center; display: inline-block; font-size: 12px; }
+        .val-display { font-weight: bold; width: 40px; text-align: center; display: inline-block; font-size: 12px; }
+
+        #hud {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.7);
+            color: #00ff00; 
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', Courier, monospace; 
+            font-size: 16px;
+            width: 250px;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+            pointer-events: none; 
+        }
+        .hud-line { display: flex; justify-content: space-between; margin-bottom: 5px; }
+        .hud-unit { font-size: 12px; color: rgba(0, 255, 0, 0.7); }
     </style>
     """
     
@@ -248,6 +266,13 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         <button onclick="changeView('center')" style="width:100%; padding: 6px;">Recentrer la vue</button>
         <hr style="width:100%; border:0; border-top:1px solid #ccc; margin: 0;">
         <button id="btn-play" onclick="toggleFlight()">▶️ Revivre le vol</button>
+    </div>
+
+    <div id="hud">
+        <div class="hud-line"><span>ALT</span><span><span id="hud-alt">0</span> <span class="hud-unit">ft</span></span></div>
+        <div class="hud-line"><span>SPD</span><span><span id="hud-spd">0</span> <span class="hud-unit">kt</span></span></div>
+        <div class="hud-line"><span>CAP</span><span><span id="hud-crs">000</span><span class="hud-unit">°</span></span></div>
+        <div class="hud-line"><span>PENTE</span><span><span id="hud-slope">0.0</span> <span class="hud-unit">%</span></span></div>
     </div>
     """
     
@@ -401,8 +426,10 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             let p2 = flightData[i+1];
             let dist = calcDist(p1, p2);
             let brng = calcBearing(p1, p2); 
+            let altDiff = p2.air_alt - p1.air_alt;
+            let slope = dist > 0 ? (altDiff / dist) * 100 : 0;
             
-            segments.push({{p1: p1, p2: p2, dist: dist, brng: brng}});
+            segments.push({{p1: p1, p2: p2, dist: dist, brng: brng, slope: slope}});
             totalDist += dist;
         }}
 
@@ -425,16 +452,19 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
                         pos: {{
                             lon: segments[i].p1.lon + (segments[i].p2.lon - segments[i].p1.lon) * prog,
                             lat: segments[i].p1.lat + (segments[i].p2.lat - segments[i].p1.lat) * prog,
-                            alt: segments[i].p1.air_alt + (segments[i].p2.air_alt - segments[i].p1.air_alt) * prog
+                            air_alt: segments[i].p1.air_alt + (segments[i].p2.air_alt - segments[i].p1.air_alt) * prog,
+                            terr_alt: segments[i].p1.terr_alt + (segments[i].p2.terr_alt - segments[i].p1.terr_alt) * prog,
+                            spd: segments[i].p1.spd + (segments[i].p2.spd - segments[i].p1.spd) * prog
                         }},
                         idx: i,
                         accum: d,
-                        brng: segments[i].brng
+                        brng: segments[i].brng,
+                        slope: segments[i].slope
                     }};
                 }}
                 d += segments[i].dist;
             }}
-            return {{ pos: segments[segments.length - 1].p2, idx: segments.length - 1, accum: d, brng: segments[segments.length - 1].brng }};
+            return {{ pos: segments[segments.length - 1].p2, idx: segments.length - 1, accum: d, brng: segments[segments.length - 1].brng, slope: segments[segments.length - 1].slope }};
         }}
 
         function toggleFlight() {{
@@ -471,6 +501,16 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             }}
         }}
 
+        function updateHud(alt, spd, crs, slope) {{
+            document.getElementById('hud-alt').innerText = Math.round(alt * 3.28084); 
+            document.getElementById('hud-spd').innerText = Math.round(spd * 1.94384); 
+            
+            let formattedCrs = Math.round(crs).toString().padStart(3, '0');
+            document.getElementById('hud-crs').innerText = formattedCrs;
+            
+            document.getElementById('hud-slope').innerText = slope.toFixed(1);
+        }}
+
         function animateFlight(time) {{
             if (!isFlying) return;
             if (!lastTime) lastTime = time;
@@ -503,24 +543,30 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             while (currentBrng < 0) currentBrng += 360;
             while (currentBrng >= 360) currentBrng -= 360;
 
-            let targetZoom = 16 - (curPos.alt / 1500); 
+            let targetZoom = 16 - (curPos.air_alt / 1500); 
             if (targetZoom < 12) targetZoom = 12; 
             if (targetZoom > 17) targetZoom = 17; 
             currentZoom += (targetZoom - currentZoom) * Math.min(1.0, dt * 0.002);
 
-            window.deckInstance.setProps({{
-                viewState: {{
-                    longitude: curPos.lon,
-                    latitude: curPos.lat,
-                    position: [0, 0, curPos.alt + altOffset], 
-                    zoom: currentZoom,
-                    pitch: 82, 
-                    maxPitch: 89, 
-                    bearing: currentBrng,
-                    transitionDuration: 0 
-                }},
-                onViewStateChange: customViewStateChange 
-            }});
+            updateHud(curPos.air_alt, curPos.spd, targetBrng, curState.slope);
+
+            let deckObj = window.deckInstance;
+            
+            if (deckObj) {{
+                deckObj.setProps({{
+                    viewState: {{
+                        longitude: curPos.lon,
+                        latitude: curPos.lat,
+                        position: [0, 0, curPos.air_alt + altOffset], 
+                        zoom: currentZoom,
+                        pitch: 82, 
+                        maxPitch: 89, 
+                        bearing: currentBrng,
+                        transitionDuration: 0 
+                    }},
+                    onViewStateChange: customViewStateChange 
+                }});
+            }}
             
             animFrame = requestAnimationFrame(animateFlight);
         }}
@@ -533,9 +579,6 @@ def generer_carte_finale_interactive(pdk_deck_object, injection_code):
     html_modifie = html_pdk_brut.replace("</body>", injection_code + "\n</body>")
     
     cible = "const deckInstance = createDeck({"
-    
-    # OPTIMISATION PERFORMANCE WINDOWS : On force useDevicePixels à false
-    # pour alléger drastiquement le calcul GPU sur les écrans à haute résolution.
     remplacement = "const deckInstance = window.deckInstance = createDeck({\n      useDevicePixels: false,"
     
     if cible in html_modifie:
@@ -566,8 +609,6 @@ centre_lon, centre_lat = calculer_centre(donnees_vol_completes)
 init_zoom = 10
 init_pitch = 65
 
-# --- Préparation des données du vol en Python Pur (Bypass de Pandas pour compatibilité Windows) ---
-
 donnees_points_vol = []
 ma_trace_pos = []
 donnees_ombre = []
@@ -577,7 +618,6 @@ for pt in donnees_vol_completes:
     alt_ft = int(pt['air_alt'] * 3.28084)
     crs = int(pt['crs'])
     
-    # Casting explicite en Python Standard
     lon = float(pt['lon'])
     lat = float(pt['lat'])
     air_alt = float(pt['air_alt'])
@@ -603,23 +643,24 @@ for pt in donnees_vol_completes:
 donnees_trace = [{"trace": ma_trace_pos, "couleur": [255, 50, 50]}]
 donnees_aeroports = charger_aeroports_france()
 
-# --- Configuration de la carte 3D ---
 ELEVATION_DECODER = {"rScaler": 256, "gScaler": 1, "bScaler": 1 / 256, "offset": -32768}
 TERRAIN_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 SATELLITE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 
 couche_relief = pdk.Layer(
-    "TerrainLayer", 
-    elevation_decoder=ELEVATION_DECODER, 
-    texture=SATELLITE_URL, 
+    "TerrainLayer",
+    id='relief-layer',
+    elevation_decoder=ELEVATION_DECODER,
+    texture=SATELLITE_URL,
     elevation_data=TERRAIN_URL,
-    max_zoom=15,         # SOLUTION 1 : Empêche les tuiles fantômes en zoomant près du sol
-    max_requests=6       # SOLUTION 2 : Empêche le serveur de rejeter tes connexions
+    max_zoom=15,         
+    max_requests=6       
 )
 
 couche_ombre = pdk.Layer(
     "LineLayer", 
     donnees_ombre, 
+    id='shadow-layer',
     get_source_position="depart", 
     get_target_position="arrivee", 
     get_color="couleur", 
@@ -629,6 +670,7 @@ couche_ombre = pdk.Layer(
 couche_trace = pdk.Layer(
     "PathLayer", 
     donnees_trace, 
+    id='trace-layer',
     get_path="trace", 
     get_color="couleur", 
     width_scale=20, 
@@ -641,6 +683,7 @@ couche_trace = pdk.Layer(
 couche_trace_interactive = pdk.Layer(
     "ScatterplotLayer",
     donnees_points_vol,
+    id='interactive-points-layer',
     get_position=['lon', 'lat', 'air_alt'],
     get_radius=40,
     get_fill_color=[255, 255, 255, 1], 
@@ -653,6 +696,7 @@ if donnees_aeroports:
     couche_aeroports_cercles = pdk.Layer(
         "ScatterplotLayer",
         donnees_aeroports,
+        id='airport-circles-layer',
         get_position=['longitude_deg', 'latitude_deg', 'elevation_m'],
         get_fill_color='couleur',
         get_radius='rayon',
@@ -665,6 +709,7 @@ if donnees_aeroports:
     couche_aeroports_textes = pdk.Layer(
         "TextLayer",
         donnees_aeroports,
+        id='airport-text-layer',
         get_position=['longitude_deg', 'latitude_deg', 'elevation_m'],
         get_text="etiquette", 
         get_size=12, 
@@ -676,7 +721,16 @@ if donnees_aeroports:
     
     liste_couches.extend([couche_aeroports_cercles, couche_aeroports_textes])
 
-vue_initiale = pdk.ViewState(longitude=centre_lon, latitude=centre_lat, zoom=init_zoom, pitch=init_pitch, max_pitch=89, bearing=45)
+first_pt = donnees_vol_completes[0]
+vue_initiale = pdk.ViewState(
+    longitude=float(first_pt['lon']),
+    latitude=float(first_pt['lat']),
+    position=[0, 0, float(first_pt['air_alt']) + 50], 
+    zoom=16, 
+    pitch=init_pitch, 
+    max_pitch=89, 
+    bearing=45
+)
 
 carte_pdk = pdk.Deck(
     layers=liste_couches,
@@ -686,10 +740,10 @@ carte_pdk = pdk.Deck(
 )
 
 print("Génération de l'application interactive...")
-code_injection = generer_controles_html(centre_lon, centre_lat, donnees_vol_completes, init_zoom, init_pitch)
+code_injection = generer_controles_html(centre_lon, centre_lat, donnees_vol_completes, init_zoom=16, init_pitch=65)
 html_application_finale = generer_carte_finale_interactive(carte_pdk, code_injection)
 
-fichier_sortie = "mon_application_vol_3d.html"
+fichier_sortie = "mon_application_vol_3d_sans_avion.html"
 with open(fichier_sortie, "w", encoding="utf-8") as f:
     f.write(html_application_finale)
 
