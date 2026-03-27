@@ -608,7 +608,14 @@ ELEVATION_DECODER = {"rScaler": 256, "gScaler": 1, "bScaler": 1 / 256, "offset":
 TERRAIN_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 SATELLITE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 
-couche_relief = pdk.Layer("TerrainLayer", elevation_decoder=ELEVATION_DECODER, texture=SATELLITE_URL, elevation_data=TERRAIN_URL)
+couche_relief = pdk.Layer(
+    "TerrainLayer", 
+    elevation_decoder=ELEVATION_DECODER, 
+    texture=SATELLITE_URL, 
+    elevation_data=TERRAIN_URL,
+    max_zoom=15,         # SOLUTION 1 : Empêche les tuiles fantômes en zoomant près du sol
+    max_requests=6       # SOLUTION 2 : Empêche le serveur de rejeter tes connexions
+)
 
 couche_ombre = pdk.Layer(
     "LineLayer", 
