@@ -3,7 +3,19 @@
 ![Example](Example.png)
 
 A Python tool to visualize flight paths from GPX files in interactive 3D maps with French airports overlay.
- 
+
+## Table of Contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Output](#output)
+- [Camera Controls](#camera-controls)
+- [Supported GPX Formats](#supported-gpx-formats)
+- [Notes](#notes)
+- [License](#license)
+
 ## Features
 
 - **File Selection Dialog**: Native file picker for macOS and Windows to select GPX files
@@ -16,13 +28,20 @@ A Python tool to visualize flight paths from GPX files in interactive 3D maps wi
 - **Camera Controls**: Interactive buttons for zoom in/out, pitch adjustment, and view recentering
 - **Satellite Imagery**: High-resolution satellite base layer
 - **Tooltips**: Hover information showing airport details (name, type, code)
+- **Flight Replay**: Replay flight with play/pause button in control panel
+- **Enhanced Controls**: Commands to adjust camera height, zoom, pitch, and recentering
+
+## Requirements
+
+- Python 3.8 or higher
+- Internet connection (for airport database and terrain tiles)
 
 ## Dependencies
 
 - `pydeck` - For 3D deck.gl visualizations
 - `pandas` - Data manipulation and airport database processing
 - `gpxpy` - GPX file parsing
-- `tkinter` - File selection dialog (Windows)
+- `tkinter` - File selection dialog (Windows, included with Python)
 
 ## Installation
 
@@ -41,14 +60,9 @@ pip install pydeck pandas gpxpy
 
 2. A native file selection dialog will open - select your GPX file containing flight track data.
 
-3. Améliorations ajoutées (2026):
-   - Relecture du vol possible avec le bouton ▶️/⏹️ dans le panneau de contrôle
-   - Ajout de commandes pour ajuster hauteur cam, zoom, pitch, et recentrage
-   - Data GPX avec description JSON (`alt`, `ele`, `spd`, `crs`) pris en charge
-
-4. Le script fera automatiquement:
-   - Télécharger la base de données des aéroports français
-   - Traiter vos données de vol
+3. The script will automatically:
+   - Download the French airports database
+   - Process your flight data
    - Generate an interactive 3D visualization
    - Open the result in your default web browser
 
@@ -73,6 +87,7 @@ Use the control panel to:
 - **Zoom buttons** (+/-): Increase/decrease zoom level
 - **Pitch buttons** (↑/↓): Adjust viewing angle
 - **Recenter button**: Return to default view centered on flight path
+- **Play/Pause button** (▶️/⏸️): Replay the flight animation
 
 ## Supported GPX Formats
 
@@ -90,3 +105,7 @@ Use the control panel to:
 - Output filename: `mon_application_vol_3d.html` (can be changed in the script)
 - Tested on macOS and Windows with Python 3.8+
 - Airport data sourced from OurAirports database (updated automatically)
+
+## License
+
+This project is open source. Please check the license file for details.
