@@ -313,24 +313,27 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         let speedMultiplier = 1.0;
         let speedInterval = null; 
 
-        // --- NOUVEAU : INJECTION DU TOOLTIP INTELLIGENT ---
-        // Cette boucle attend que la carte 3D soit chargée, puis reprogramme l'affichage de la souris
+        // --- CODE COULEUR INTELLIGENT (FILTRE CTR UNIQUEMENT) ---
         let tooltipInterval = setInterval(() => {{
             if (window.deckInstance && !window.tooltipOverridden) {{
-                window.deckInstance.setProps({{
+                let deckObj = window.deckInstance;
+                
+                // 1. Tooltip intelligent (Ignore ce qui n'est pas CTR)
+                deckObj.setProps({{
                     getTooltip: ({{object}}) => {{
                         if (!object) return null;
-                        
-                        // Si c'est un point de notre trace de vol (notre HTML pré-calculé)
                         if (object.tooltip_html) return {{html: object.tooltip_html}};
                         
-                        // Si c'est un espace aérien (on décode les propriétés GeoJSON en direct)
                         if (object.properties) {{
                             let p = object.properties;
-                            let html = `<div style="font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4;">`;
-                            html += `<b style="color: #ffaa00; font-size: 15px;">Espace Aérien</b><br/><hr style="margin: 4px 0; border: 0; border-top: 1px solid #777;">`;
+                            let n = (p.NAME || p.name || "").toUpperCase();
+                            let t = (p.TYPE || p.type || p.CLASS || p.class || "").toUpperCase();
                             
-                            // Affiche automatiquement Plafond, Plancher, Nom, Classe... peu importe comment le fichier les appelle !
+                            // On ignore tout ce qui n'est pas une CTR pour la souris
+                            if (!(n.includes("CTR") || t.includes("CTR"))) return null;
+
+                            let html = `<div style="font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4;">`;
+                            html += `<b style="color: #00aaff; font-size: 15px;">Zone de Contrôle (CTR)</b><br/><hr style="margin: 4px 0; border: 0; border-top: 1px solid #777;">`;
                             for (let key in p) {{
                                 if (p[key] !== null && p[key] !== "") {{
                                     html += `<b>${{key}}</b>: ${{p[key]}}<br/>`;
@@ -345,6 +348,38 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
                         return null;
                     }}
                 }});
+
+                // 2. Coloration dynamique (Les non-CTR deviennent totalement transparentes)
+                let layers = deckObj.props.layers;
+                let newLayers = layers.map(l => {{
+                    if (l.id === 'airspace-layer') {{
+                        return l.clone({{
+                            getFillColor: f => {{
+                                if (!f || !f.properties) return [0, 0, 0, 0];
+                                let n = (f.properties.NAME || f.properties.name || "").toUpperCase();
+                                let t = (f.properties.TYPE || f.properties.type || f.properties.CLASS || f.properties.class || "").toUpperCase();
+                                
+                                if (n.includes("CTR") || t.includes("CTR")) return [0, 150, 255, 30]; 
+                                return [0, 0, 0, 0]; // Invisible
+                            }},
+                            getLineColor: f => {{
+                                if (!f || !f.properties) return [0, 0, 0, 0];
+                                let n = (f.properties.NAME || f.properties.name || "").toUpperCase();
+                                let t = (f.properties.TYPE || f.properties.type || f.properties.CLASS || f.properties.class || "").toUpperCase();
+                                
+                                if (n.includes("CTR") || t.includes("CTR")) return [0, 100, 255, 150];
+                                return [0, 0, 0, 0]; // Invisible
+                            }},
+                            updateTriggers: {{
+                                getFillColor: true,
+                                getLineColor: true
+                            }}
+                        }});
+                    }}
+                    return l;
+                }});
+                deckObj.setProps({{ layers: newLayers }});
+
                 window.tooltipOverridden = true;
                 clearInterval(tooltipInterval);
             }}
@@ -740,7 +775,6 @@ donnees_aeroports = charger_aeroports_france()
 
 ELEVATION_DECODER = {"rScaler": 256, "gScaler": 1, "bScaler": 1 / 256, "offset": -32768}
 TERRAIN_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
-
 SATELLITE_URL = "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
 
 couche_relief = pdk.Layer(
@@ -753,16 +787,18 @@ couche_relief = pdk.Layer(
     max_requests=6       
 )
 
-# --- NOUVEAU : On enlève l'extrusion 3D pour les espaces pour y voir clair ---
+# --- MAGIE WEBGL : depthTest = False ---
 couche_zones_vol = pdk.Layer(
     "GeoJsonLayer",
+    id="airspace-layer",
     data="https://planeur-net.github.io/airspace/france.geojson",
-    opacity=0.4,  
+    opacity=1.0, 
     stroked=True,
     filled=True,
-    extruded=False, # <-- Modifié : Fini les murs géants, bonjour l'empreinte au sol !
-    get_fill_color=[255, 120, 0, 20],   
-    get_line_color=[255, 100, 0, 150],   
+    extruded=False, 
+    parameters={"depthTest": False}, 
+    get_fill_color=[0, 0, 0, 0],   # Invisible par défaut (le JS repassera en bleu les CTR)
+    get_line_color=[0, 0, 0, 0],   # Invisible par défaut
     get_line_width=15,
     line_width_min_pixels=1,
     pickable=True
@@ -798,10 +834,8 @@ couche_trace_interactive = pdk.Layer(
     pickable=True, 
 )
 
-# --- NOUVEAU : ORDRE MAGIQUE DES COUCHES ---
-# La couche_zones_vol est placée tout à la fin ! Ainsi, elle est peinte en dernier,
-# comme une couche de vernis orange au-dessus de ta trace et du relief. Plus rien ne s'efface !
-liste_couches = [couche_relief, couche_ombre, couche_trace, couche_trace_interactive]
+# --- NOUVEL ORDRE DES COUCHES ---
+liste_couches = [couche_relief, couche_zones_vol, couche_ombre, couche_trace, couche_trace_interactive]
 
 if donnees_aeroports:
     couche_aeroports_cercles = pdk.Layer(
@@ -830,16 +864,13 @@ if donnees_aeroports:
     
     liste_couches.extend([couche_aeroports_cercles, couche_aeroports_textes])
 
-# Ajout de la couche des zones à la toute fin de la liste !
-liste_couches.append(couche_zones_vol)
-
 vue_initiale = pdk.ViewState(longitude=centre_lon, latitude=centre_lat, zoom=init_zoom, pitch=init_pitch, max_pitch=89, bearing=45)
 
 carte_pdk = pdk.Deck(
     layers=liste_couches,
     initial_view_state=vue_initiale,
     map_provider=None,
-    tooltip=True # <-- NOUVEAU : On active l'outil natif, que notre JS va redessiner intelligemment
+    tooltip=True 
 )
 
 print("Génération de l'application interactive...")
