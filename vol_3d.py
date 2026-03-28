@@ -239,8 +239,8 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         <div class="control-group" style="flex-direction: column; align-items: flex-start;">
             <span style="margin-bottom: 2px;">Fond de carte</span>
             <select id="basemap-select" onchange="changeBasemap()" style="width: 100%;">
-                <option value="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}">Satellite (ArcGIS)</option>
                 <option value="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}">Satellite (Google)</option>
+                <option value="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}">Satellite (ArcGIS)</option>
                 <option value="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png">Routes (OpenStreetMap)</option>
                 <option value="https://a.tile.opentopomap.org/{z}/{x}/{y}.png">Topographie (OpenTopo)</option>
                 <option value="https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png">Clair (Carto Light)</option>
@@ -704,8 +704,8 @@ donnees_aeroports = charger_aeroports_france()
 ELEVATION_DECODER = {"rScaler": 256, "gScaler": 1, "bScaler": 1 / 256, "offset": -32768}
 TERRAIN_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 
-# ArcGIS reste l'option par défaut chargée en Python au lancement
-SATELLITE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+# On démarre avec la carte Satellite Google par défaut
+SATELLITE_URL = "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
 
 couche_relief = pdk.Layer(
     "TerrainLayer",
