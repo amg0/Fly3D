@@ -313,6 +313,43 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         let speedMultiplier = 1.0;
         let speedInterval = null; 
 
+        // --- NOUVEAU : INJECTION DU TOOLTIP INTELLIGENT ---
+        // Cette boucle attend que la carte 3D soit chargée, puis reprogramme l'affichage de la souris
+        let tooltipInterval = setInterval(() => {{
+            if (window.deckInstance && !window.tooltipOverridden) {{
+                window.deckInstance.setProps({{
+                    getTooltip: ({{object}}) => {{
+                        if (!object) return null;
+                        
+                        // Si c'est un point de notre trace de vol (notre HTML pré-calculé)
+                        if (object.tooltip_html) return {{html: object.tooltip_html}};
+                        
+                        // Si c'est un espace aérien (on décode les propriétés GeoJSON en direct)
+                        if (object.properties) {{
+                            let p = object.properties;
+                            let html = `<div style="font-family: Arial, sans-serif; font-size: 13px; line-height: 1.4;">`;
+                            html += `<b style="color: #ffaa00; font-size: 15px;">Espace Aérien</b><br/><hr style="margin: 4px 0; border: 0; border-top: 1px solid #777;">`;
+                            
+                            // Affiche automatiquement Plafond, Plancher, Nom, Classe... peu importe comment le fichier les appelle !
+                            for (let key in p) {{
+                                if (p[key] !== null && p[key] !== "") {{
+                                    html += `<b>${{key}}</b>: ${{p[key]}}<br/>`;
+                                }}
+                            }}
+                            html += `</div>`;
+                            return {{
+                                html: html, 
+                                style: {{backgroundColor: 'rgba(20, 20, 20, 0.9)', color: '#ffffff', borderRadius: '6px', padding: '10px'}}
+                            }};
+                        }}
+                        return null;
+                    }}
+                }});
+                window.tooltipOverridden = true;
+                clearInterval(tooltipInterval);
+            }}
+        }}, 500);
+
         function changeBasemap() {{
             let select = document.getElementById('basemap-select');
             let newUrl = select.value;
@@ -704,7 +741,6 @@ donnees_aeroports = charger_aeroports_france()
 ELEVATION_DECODER = {"rScaler": 256, "gScaler": 1, "bScaler": 1 / 256, "offset": -32768}
 TERRAIN_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 
-# On démarre avec la carte Satellite Google par défaut
 SATELLITE_URL = "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"
 
 couche_relief = pdk.Layer(
@@ -715,6 +751,21 @@ couche_relief = pdk.Layer(
     elevation_data=TERRAIN_URL,
     max_zoom=15,         
     max_requests=6       
+)
+
+# --- NOUVEAU : On enlève l'extrusion 3D pour les espaces pour y voir clair ---
+couche_zones_vol = pdk.Layer(
+    "GeoJsonLayer",
+    data="https://planeur-net.github.io/airspace/france.geojson",
+    opacity=0.4,  
+    stroked=True,
+    filled=True,
+    extruded=False, # <-- Modifié : Fini les murs géants, bonjour l'empreinte au sol !
+    get_fill_color=[255, 120, 0, 20],   
+    get_line_color=[255, 100, 0, 150],   
+    get_line_width=15,
+    line_width_min_pixels=1,
+    pickable=True
 )
 
 couche_ombre = pdk.Layer(
@@ -747,6 +798,9 @@ couche_trace_interactive = pdk.Layer(
     pickable=True, 
 )
 
+# --- NOUVEAU : ORDRE MAGIQUE DES COUCHES ---
+# La couche_zones_vol est placée tout à la fin ! Ainsi, elle est peinte en dernier,
+# comme une couche de vernis orange au-dessus de ta trace et du relief. Plus rien ne s'efface !
 liste_couches = [couche_relief, couche_ombre, couche_trace, couche_trace_interactive]
 
 if donnees_aeroports:
@@ -776,13 +830,16 @@ if donnees_aeroports:
     
     liste_couches.extend([couche_aeroports_cercles, couche_aeroports_textes])
 
+# Ajout de la couche des zones à la toute fin de la liste !
+liste_couches.append(couche_zones_vol)
+
 vue_initiale = pdk.ViewState(longitude=centre_lon, latitude=centre_lat, zoom=init_zoom, pitch=init_pitch, max_pitch=89, bearing=45)
 
 carte_pdk = pdk.Deck(
     layers=liste_couches,
     initial_view_state=vue_initiale,
     map_provider=None,
-    tooltip={"html": "{tooltip_html}"} 
+    tooltip=True # <-- NOUVEAU : On active l'outil natif, que notre JS va redessiner intelligemment
 )
 
 print("Génération de l'application interactive...")
