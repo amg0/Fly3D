@@ -204,6 +204,25 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         #btn-play:hover { background-color: #218838; }
         
         .val-display { font-weight: bold; width: 45px; text-align: center; display: inline-block; font-size: 12px; }
+
+        /* --- NOUVEAU : STYLE DU HUD --- */
+        #hud {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.7);
+            color: #00ff00; 
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', Courier, monospace; 
+            font-size: 16px;
+            width: 250px;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+            pointer-events: none; 
+        }
+        .hud-line { display: flex; justify-content: space-between; margin-bottom: 5px; }
+        .hud-unit { font-size: 12px; color: rgba(0, 255, 0, 0.7); }
     </style>
     """
     
@@ -248,6 +267,13 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         <button onclick="changeView('center')" style="width:100%; padding: 6px;">Recentrer la vue</button>
         <hr style="width:100%; border:0; border-top:1px solid #ccc; margin: 0;">
         <button id="btn-play" onclick="toggleFlight()">▶️ Revivre le vol</button>
+    </div>
+
+    <div id="hud">
+        <div class="hud-line"><span>ALT</span><span><span id="hud-alt">0</span> <span class="hud-unit">ft</span></span></div>
+        <div class="hud-line"><span>SPD</span><span><span id="hud-spd">0</span> <span class="hud-unit">kt</span></span></div>
+        <div class="hud-line"><span>CAP</span><span><span id="hud-crs">000</span><span class="hud-unit">°</span></span></div>
+        <div class="hud-line"><span>PENTE</span><span><span id="hud-slope">0.0</span> <span class="hud-unit">%</span></span></div>
     </div>
     """
     
@@ -402,7 +428,11 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             let dist = calcDist(p1, p2);
             let brng = calcBearing(p1, p2); 
             
-            segments.push({{p1: p1, p2: p2, dist: dist, brng: brng}});
+            // --- NOUVEAU : CALCUL DE LA PENTE ---
+            let altDiff = p2.air_alt - p1.air_alt;
+            let slope = dist > 0 ? (altDiff / dist) * 100 : 0;
+            
+            segments.push({{p1: p1, p2: p2, dist: dist, brng: brng, slope: slope}});
             totalDist += dist;
         }}
 
@@ -425,16 +455,18 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
                         pos: {{
                             lon: segments[i].p1.lon + (segments[i].p2.lon - segments[i].p1.lon) * prog,
                             lat: segments[i].p1.lat + (segments[i].p2.lat - segments[i].p1.lat) * prog,
-                            alt: segments[i].p1.air_alt + (segments[i].p2.air_alt - segments[i].p1.air_alt) * prog
+                            air_alt: segments[i].p1.air_alt + (segments[i].p2.air_alt - segments[i].p1.air_alt) * prog,
+                            spd: segments[i].p1.spd + (segments[i].p2.spd - segments[i].p1.spd) * prog
                         }},
                         idx: i,
                         accum: d,
-                        brng: segments[i].brng
+                        brng: segments[i].brng,
+                        slope: segments[i].slope
                     }};
                 }}
                 d += segments[i].dist;
             }}
-            return {{ pos: segments[segments.length - 1].p2, idx: segments.length - 1, accum: d, brng: segments[segments.length - 1].brng }};
+            return {{ pos: segments[segments.length - 1].p2, idx: segments.length - 1, accum: d, brng: segments[segments.length - 1].brng, slope: segments[segments.length - 1].slope }};
         }}
 
         function toggleFlight() {{
@@ -471,6 +503,17 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             }}
         }}
 
+        // --- NOUVEAU : FONCTION DE MISE A JOUR DE L'ECRAN ---
+        function updateHud(alt, spd, crs, slope) {{
+            document.getElementById('hud-alt').innerText = Math.round(alt * 3.28084); 
+            document.getElementById('hud-spd').innerText = Math.round(spd * 1.94384); 
+            
+            let formattedCrs = Math.round(crs).toString().padStart(3, '0');
+            document.getElementById('hud-crs').innerText = formattedCrs;
+            
+            document.getElementById('hud-slope').innerText = (slope || 0).toFixed(1);
+        }}
+
         function animateFlight(time) {{
             if (!isFlying) return;
             if (!lastTime) lastTime = time;
@@ -503,16 +546,19 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             while (currentBrng < 0) currentBrng += 360;
             while (currentBrng >= 360) currentBrng -= 360;
 
-            let targetZoom = 16 - (curPos.alt / 1500); 
+            let targetZoom = 16 - (curPos.air_alt / 1500); 
             if (targetZoom < 12) targetZoom = 12; 
             if (targetZoom > 17) targetZoom = 17; 
             currentZoom += (targetZoom - currentZoom) * Math.min(1.0, dt * 0.002);
+
+            // --- NOUVEAU : ON APPELLE LA MISE A JOUR A CHAQUE FRAME ---
+            updateHud(curPos.air_alt, curPos.spd, targetBrng, curState.slope);
 
             window.deckInstance.setProps({{
                 viewState: {{
                     longitude: curPos.lon,
                     latitude: curPos.lat,
-                    position: [0, 0, curPos.alt + altOffset], 
+                    position: [0, 0, curPos.air_alt + altOffset], 
                     zoom: currentZoom,
                     pitch: 82, 
                     maxPitch: 89, 
@@ -631,9 +677,9 @@ couche_trace = pdk.Layer(
     donnees_trace, 
     get_path="trace", 
     get_color="couleur", 
-    width_scale=20, 
-    width_min_pixels=5, 
-    get_width=5, 
+    width_scale=1,           # <-- Réduit massivement (était 20)
+    width_min_pixels=2,      # <-- Épaisseur minimum à l'écran : 2 pixels (était 5)
+    get_width=5,             # <-- Largeur réelle sur le sol : 5 mètres
     joint_rounded=True, 
     cap_rounded=True
 )
