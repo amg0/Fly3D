@@ -203,6 +203,15 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         
         .val-display { font-weight: bold; width: 45px; text-align: center; display: inline-block; font-size: 12px; }
 
+        select {
+            background-color: #f8f9fa;
+            border: 1px solid #ced4da;
+            padding: 4px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
         #hud {
             position: absolute;
             bottom: 20px;
@@ -226,6 +235,19 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
     html = """
     <div id="control-panel">
         <h3>Caméra PyDeck</h3>
+        
+        <div class="control-group" style="flex-direction: column; align-items: flex-start;">
+            <span style="margin-bottom: 2px;">Fond de carte</span>
+            <select id="basemap-select" onchange="changeBasemap()" style="width: 100%;">
+                <option value="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}">Satellite (ArcGIS)</option>
+                <option value="https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}">Satellite (Google)</option>
+                <option value="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png">Routes (OpenStreetMap)</option>
+                <option value="https://a.tile.opentopomap.org/{z}/{x}/{y}.png">Topographie (OpenTopo)</option>
+                <option value="https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png">Clair (Carto Light)</option>
+                <option value="https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png">Sombre (Carto Dark)</option>
+            </select>
+        </div>
+        <hr style="width:100%; border:0; border-top:1px solid #ccc; margin: 2px 0;">
         
         <div class="control-group">
             <span>Zoom</span>
@@ -283,7 +305,6 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         const defaultPitch = {init_pitch};
         const defaultBearing = 45;
 
-        // Variables d'offsets modifiables par l'utilisateur pendant le vol
         let altOffset = 10;
         let zoomOffset = 0;   
         let pitchOffset = 0;  
@@ -291,6 +312,22 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         let altInterval = null;
         let speedMultiplier = 1.0;
         let speedInterval = null; 
+
+        function changeBasemap() {{
+            let select = document.getElementById('basemap-select');
+            let newUrl = select.value;
+            let deckObj = window.deckInstance;
+            if (!deckObj) return;
+
+            let layers = deckObj.props.layers;
+            let newLayers = layers.map(l => {{
+                if (l.id === 'relief-layer') {{
+                    return l.clone({{ texture: newUrl }});
+                }}
+                return l;
+            }});
+            deckObj.setProps({{ layers: newLayers }});
+        }}
 
         function customViewStateChange({{viewState}}) {{
             let deckObj = window.deckInstance;
@@ -370,7 +407,6 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             let deckObj = window.deckInstance;
             if (!deckObj) return;
             
-            // On ne stoppe le vol que si l'utilisateur demande à RECENTRER la vue globalement
             if (isFlying && action === 'center') toggleFlight(); 
 
             let currentViewState = deckObj.props.viewState || deckObj.props.initialViewState;
@@ -382,7 +418,7 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
                 case 'zoomIn': 
                     zoomOffset += 0.8; 
                     if (!isFlying) newViewState.zoom += 0.8;
-                    else currentZoom += 0.8; // Applique instantanément au vol en cours
+                    else currentZoom += 0.8; 
                     break;
                 case 'zoomOut': 
                     zoomOffset -= 0.8; 
@@ -411,7 +447,6 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
                     break;
             }}
 
-            // Si on ne vole pas, on applique la transition à la caméra
             if (!isFlying) {{
                 newViewState.transitionDuration = 500; 
                 deckObj.setProps({{ 
@@ -568,13 +603,11 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             while (currentBrng < 0) currentBrng += 360;
             while (currentBrng >= 360) currentBrng -= 360;
 
-            // Ajout du zoomOffset pour permettre le réglage en direct
             let targetZoom = 16 - (curPos.air_alt / 1500) + zoomOffset; 
             if (targetZoom < 4) targetZoom = 4; 
             if (targetZoom > 20) targetZoom = 20; 
             currentZoom += (targetZoom - currentZoom) * Math.min(1.0, dt * 0.002);
 
-            // Ajout du pitchOffset pour incliner la caméra en direct
             let targetPitch = Math.max(0, Math.min(82 + pitchOffset, 89));
 
             updateHud(curPos.air_alt, curPos.spd, targetBrng, curState.slope);
@@ -604,8 +637,6 @@ def generer_carte_finale_interactive(pdk_deck_object, injection_code):
     html_modifie = html_pdk_brut.replace("</body>", injection_code + "\n</body>")
     
     cible = "const deckInstance = createDeck({"
-    
-    # OPTIMISATION PERFORMANCE WINDOWS : On force useDevicePixels à false
     remplacement = "const deckInstance = window.deckInstance = createDeck({\n      useDevicePixels: false,"
     
     if cible in html_modifie:
@@ -672,12 +703,15 @@ donnees_aeroports = charger_aeroports_france()
 
 ELEVATION_DECODER = {"rScaler": 256, "gScaler": 1, "bScaler": 1 / 256, "offset": -32768}
 TERRAIN_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+
+# ArcGIS reste l'option par défaut chargée en Python au lancement
 SATELLITE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 
 couche_relief = pdk.Layer(
-    "TerrainLayer", 
-    elevation_decoder=ELEVATION_DECODER, 
-    texture=SATELLITE_URL, 
+    "TerrainLayer",
+    id='relief-layer', 
+    elevation_decoder=ELEVATION_DECODER,
+    texture=SATELLITE_URL,
     elevation_data=TERRAIN_URL,
     max_zoom=15,         
     max_requests=6       
@@ -697,9 +731,9 @@ couche_trace = pdk.Layer(
     donnees_trace, 
     get_path="trace", 
     get_color="couleur", 
-    width_scale=1,           # Largeur réduite au sol pour éviter l'effet moquette
-    width_min_pixels=2,      # Reste visible (2 pixels min) quand on est très haut
-    get_width=5,             # 5 mètres de large sur le sol (très réaliste)
+    width_scale=1,           
+    width_min_pixels=2,      
+    get_width=5,             
     joint_rounded=True, 
     cap_rounded=True
 )
