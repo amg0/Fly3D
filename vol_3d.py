@@ -58,7 +58,6 @@ def charger_aeroports_france():
         print("⬇️ Téléchargement en cours de la base de données des aéroports...")
         df = pd.read_csv(url, low_memory=False)
         
-        # Nettoyage des données pour éviter les variables vides
         df = df[df['iso_country'] == 'FR']
         df = df[df['type'] != 'closed']
         df = df.dropna(subset=['longitude_deg', 'latitude_deg'])
@@ -86,7 +85,6 @@ def charger_aeroports_france():
         df['couleur'] = df['type'].apply(get_color)
         df['rayon'] = df['type'].apply(get_radius)
         
-        # SOLUTION ANTI-PLANTAGE WINDOWS : On convertit le DataFrame en objets Python purs
         records = df.to_dict(orient='records')
         clean_records = []
         for r in records:
@@ -205,7 +203,6 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         
         .val-display { font-weight: bold; width: 45px; text-align: center; display: inline-block; font-size: 12px; }
 
-        /* --- NOUVEAU : STYLE DU HUD --- */
         #hud {
             position: absolute;
             bottom: 20px;
@@ -286,7 +283,11 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         const defaultPitch = {init_pitch};
         const defaultBearing = 45;
 
+        // Variables d'offsets modifiables par l'utilisateur pendant le vol
         let altOffset = 10;
+        let zoomOffset = 0;   
+        let pitchOffset = 0;  
+        
         let altInterval = null;
         let speedMultiplier = 1.0;
         let speedInterval = null; 
@@ -368,19 +369,39 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
         function changeView(action) {{
             let deckObj = window.deckInstance;
             if (!deckObj) return;
-            if (isFlying) toggleFlight(); 
             
+            // On ne stoppe le vol que si l'utilisateur demande à RECENTRER la vue globalement
+            if (isFlying && action === 'center') toggleFlight(); 
+
             let currentViewState = deckObj.props.viewState || deckObj.props.initialViewState;
             if (!currentViewState) return;
             let newViewState = {{ ...currentViewState }};
             newViewState.maxPitch = 89; 
 
             switch (action) {{
-                case 'zoomIn': newViewState.zoom += 0.8; break;
-                case 'zoomOut': newViewState.zoom -= 0.8; break;
-                case 'pitchUp': newViewState.pitch = Math.min(newViewState.pitch + 15, 89); break; 
-                case 'pitchDown': newViewState.pitch = Math.max(newViewState.pitch - 15, 0); break;
+                case 'zoomIn': 
+                    zoomOffset += 0.8; 
+                    if (!isFlying) newViewState.zoom += 0.8;
+                    else currentZoom += 0.8; // Applique instantanément au vol en cours
+                    break;
+                case 'zoomOut': 
+                    zoomOffset -= 0.8; 
+                    if (!isFlying) newViewState.zoom -= 0.8;
+                    else currentZoom -= 0.8;
+                    break;
+                case 'pitchUp': 
+                    pitchOffset += 10;
+                    if (!isFlying) newViewState.pitch = Math.min(newViewState.pitch + 10, 89);
+                    break; 
+                case 'pitchDown': 
+                    pitchOffset -= 10;
+                    if (!isFlying) newViewState.pitch = Math.max(newViewState.pitch - 10, 0);
+                    break;
                 case 'center':
+                    zoomOffset = 0;
+                    pitchOffset = 0;
+                    altOffset = 10;
+                    document.getElementById('alt-val').innerText = "10m";
                     newViewState.longitude = centerPos.longitude;
                     newViewState.latitude = centerPos.latitude;
                     newViewState.position = [0, 0, 0]; 
@@ -390,11 +411,14 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
                     break;
             }}
 
-            newViewState.transitionDuration = 800; 
-            deckObj.setProps({{ 
-                viewState: newViewState,
-                onViewStateChange: customViewStateChange 
-            }});
+            // Si on ne vole pas, on applique la transition à la caméra
+            if (!isFlying) {{
+                newViewState.transitionDuration = 500; 
+                deckObj.setProps({{ 
+                    viewState: newViewState,
+                    onViewStateChange: customViewStateChange 
+                }});
+            }}
         }}
 
         const flightData = {vol_json};
@@ -428,7 +452,6 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             let dist = calcDist(p1, p2);
             let brng = calcBearing(p1, p2); 
             
-            // --- NOUVEAU : CALCUL DE LA PENTE ---
             let altDiff = p2.air_alt - p1.air_alt;
             let slope = dist > 0 ? (altDiff / dist) * 100 : 0;
             
@@ -503,7 +526,6 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             }}
         }}
 
-        // --- NOUVEAU : FONCTION DE MISE A JOUR DE L'ECRAN ---
         function updateHud(alt, spd, crs, slope) {{
             document.getElementById('hud-alt').innerText = Math.round(alt * 3.28084); 
             document.getElementById('hud-spd').innerText = Math.round(spd * 1.94384); 
@@ -546,12 +568,15 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
             while (currentBrng < 0) currentBrng += 360;
             while (currentBrng >= 360) currentBrng -= 360;
 
-            let targetZoom = 16 - (curPos.air_alt / 1500); 
-            if (targetZoom < 12) targetZoom = 12; 
-            if (targetZoom > 17) targetZoom = 17; 
+            // Ajout du zoomOffset pour permettre le réglage en direct
+            let targetZoom = 16 - (curPos.air_alt / 1500) + zoomOffset; 
+            if (targetZoom < 4) targetZoom = 4; 
+            if (targetZoom > 20) targetZoom = 20; 
             currentZoom += (targetZoom - currentZoom) * Math.min(1.0, dt * 0.002);
 
-            // --- NOUVEAU : ON APPELLE LA MISE A JOUR A CHAQUE FRAME ---
+            // Ajout du pitchOffset pour incliner la caméra en direct
+            let targetPitch = Math.max(0, Math.min(82 + pitchOffset, 89));
+
             updateHud(curPos.air_alt, curPos.spd, targetBrng, curState.slope);
 
             window.deckInstance.setProps({{
@@ -560,7 +585,7 @@ def generer_controles_html(centre_lon, centre_lat, donnees_vol, init_zoom=10, in
                     latitude: curPos.lat,
                     position: [0, 0, curPos.air_alt + altOffset], 
                     zoom: currentZoom,
-                    pitch: 82, 
+                    pitch: targetPitch, 
                     maxPitch: 89, 
                     bearing: currentBrng,
                     transitionDuration: 0 
@@ -581,7 +606,6 @@ def generer_carte_finale_interactive(pdk_deck_object, injection_code):
     cible = "const deckInstance = createDeck({"
     
     # OPTIMISATION PERFORMANCE WINDOWS : On force useDevicePixels à false
-    # pour alléger drastiquement le calcul GPU sur les écrans à haute résolution.
     remplacement = "const deckInstance = window.deckInstance = createDeck({\n      useDevicePixels: false,"
     
     if cible in html_modifie:
@@ -612,8 +636,6 @@ centre_lon, centre_lat = calculer_centre(donnees_vol_completes)
 init_zoom = 10
 init_pitch = 65
 
-# --- Préparation des données du vol en Python Pur (Bypass de Pandas pour compatibilité Windows) ---
-
 donnees_points_vol = []
 ma_trace_pos = []
 donnees_ombre = []
@@ -623,7 +645,6 @@ for pt in donnees_vol_completes:
     alt_ft = int(pt['air_alt'] * 3.28084)
     crs = int(pt['crs'])
     
-    # Casting explicite en Python Standard
     lon = float(pt['lon'])
     lat = float(pt['lat'])
     air_alt = float(pt['air_alt'])
@@ -649,7 +670,6 @@ for pt in donnees_vol_completes:
 donnees_trace = [{"trace": ma_trace_pos, "couleur": [255, 50, 50]}]
 donnees_aeroports = charger_aeroports_france()
 
-# --- Configuration de la carte 3D ---
 ELEVATION_DECODER = {"rScaler": 256, "gScaler": 1, "bScaler": 1 / 256, "offset": -32768}
 TERRAIN_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 SATELLITE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
@@ -659,8 +679,8 @@ couche_relief = pdk.Layer(
     elevation_decoder=ELEVATION_DECODER, 
     texture=SATELLITE_URL, 
     elevation_data=TERRAIN_URL,
-    max_zoom=15,         # SOLUTION 1 : Empêche les tuiles fantômes en zoomant près du sol
-    max_requests=6       # SOLUTION 2 : Empêche le serveur de rejeter tes connexions
+    max_zoom=15,         
+    max_requests=6       
 )
 
 couche_ombre = pdk.Layer(
@@ -677,9 +697,9 @@ couche_trace = pdk.Layer(
     donnees_trace, 
     get_path="trace", 
     get_color="couleur", 
-    width_scale=1,           # <-- Réduit massivement (était 20)
-    width_min_pixels=2,      # <-- Épaisseur minimum à l'écran : 2 pixels (était 5)
-    get_width=5,             # <-- Largeur réelle sur le sol : 5 mètres
+    width_scale=1,           # Largeur réduite au sol pour éviter l'effet moquette
+    width_min_pixels=2,      # Reste visible (2 pixels min) quand on est très haut
+    get_width=5,             # 5 mètres de large sur le sol (très réaliste)
     joint_rounded=True, 
     cap_rounded=True
 )
